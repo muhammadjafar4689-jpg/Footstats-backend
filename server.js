@@ -1,17 +1,13 @@
-// FOOTSTATS PREDICTION CHALLENGE BACKEND
-// Complete server.js
-// Node.js + Express + The Odds API + Supabase
-
 require("dotenv").config();
 
 const express = require("express");
 const cors = require("cors");
 
 const app = express();
-const PORT = process.env.PORT || 3000;
-
 app.use(cors());
 app.use(express.json({ limit: "1mb" }));
+
+const PORT = process.env.PORT || 3000;
 
 const ODDS_API_KEY = process.env.ODDS_API_KEY;
 const SUPABASE_URL = (process.env.SUPABASE_URL || "").replace(/\/+$/, "");
@@ -19,195 +15,193 @@ const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const SCORING_SECRET = process.env.SCORING_SECRET;
 
 const ODDS_BASE = "https://api.the-odds-api.com/v4";
-const MAX_PICKS = 15;
-const POINTS_PER_PICK = 3;
-const MATCH_WINDOW_MS = 6 * 60 * 60 * 1000;
+const TABLE = "prediction_entries";
 
-const COMPETITIONS = [
-  { code: "PL", name: "Premier League", country: "England", sport: "soccer_epl" },
-  { code: "ELC", name: "Championship", country: "England", sport: "soccer_efl_champ" },
-  { code: "PD", name: "La Liga", country: "Spain", sport: "soccer_spain_la_liga" },
-  { code: "SA", name: "Serie A", country: "Italy", sport: "soccer_italy_serie_a" },
-  { code: "BL1", name: "Bundesliga", country: "Germany", sport: "soccer_germany_bundesliga" },
-  { code: "FL1", name: "Ligue 1", country: "France", sport: "soccer_france_ligue_one" },
-  { code: "CL", name: "UEFA Champions League", country: "Europe", sport: "soccer_uefa_champs_league" },
-  { code: "EL", name: "UEFA Europa League", country: "Europe", sport: "soccer_uefa_europa_league" },
-  { code: "PPL", name: "Primeira Liga", country: "Portugal", sport: "soccer_portugal_primeira_liga" },
-  { code: "DED", name: "Eredivisie", country: "Netherlands", sport: "soccer_netherlands_eredivisie" },
-  { code: "BSA", name: "Campeonato Brasileiro Série A", country: "Brazil", sport: "soccer_brazil_campeonato" },
-  { code: "WC", name: "FIFA World Cup", country: "World", sport: "soccer_fifa_world_cup" },
-  { code: "EC", name: "European Championship", country: "Europe", sport: "soccer_uefa_european_championship" }
-];
+const TZ = "Africa/Lagos";
+const POINTS_MULTIPLIER = 100;
 
-const TEAM_ALIASES = {
-  "atletico mineiro": ["ca mineiro", "atletico mg", "atl mineiro", "galo"],
-  "ca mineiro": ["atletico mineiro", "atletico mg", "atl mineiro"],
-  "rb bragantino": ["red bull bragantino", "bragantino", "bragantino sp"],
-  "red bull bragantino": ["rb bragantino", "bragantino", "bragantino sp"],
-  "chapecoense": ["chapecoense af", "associacao chapecoense"],
-  "rem o": ["clube do remo", "remo"],
-  "clube do remo": ["remo"],
-  "inter milan": ["fc internazionale milano", "internazionale", "inter", "internazionale milano"],
-  "internazionale": ["inter milan", "fc internazionale milano", "inter"],
-  "ac milan": ["milan", "associazione calcio milan"],
-  "bologna": ["bologna fc 1909", "fc bologna"],
-  "juventus": ["juventus fc"],
-  "napoli": ["ssc napoli", "societa sportiva calcio napoli"],
-  "sporting cp": ["sporting clube de portugal", "sporting lisbon", "sporting"],
-  "sporting clube de portugal": ["sporting cp", "sporting lisbon", "sporting"],
-  "casa pia": ["casa pia ac"],
-  "lille": ["lille osc"],
-  "lens": ["rc lens", "racing club de lens"],
-  "sao paulo": ["sao paulo fc", "são paulo", "são paulo fc"],
-  "bahia": ["ec bahia"],
-  "palmeiras": ["se palmeiras"],
-  "santos": ["santos fc"],
-  "fluminense": ["fluminense fc"],
-  "internacional": ["sc internacional", "internacional rs"],
-  "botafogo": ["botafogo fr", "botafogo rj"],
-  "cruzeiro": ["cruzeiro ec"],
-  "parma": ["parma calcio 1913"],
-  "udinese": ["udinese calcio"],
-  "fiorentina": ["acf fiorentina"],
-  "atalanta": ["atalanta bc"],
-  "genoa": ["genoa cfc"],
-  "venezia": ["venezia fc"],
-  "monza": ["ac monza"],
-  "frosinone": ["frosinone calcio"],
-  "lecce": ["us lecce"]
-};
+/* -------------------------------------------------------
+   BASIC HELPERS
+------------------------------------------------------- */
+
+function todayNigeria() {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: TZ,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(new Date());
+
+  const p = {};
+  for (const item of parts) {
+    if (item.type !== "literal") p[item.type] = item.value;
+  }
+
+  return `${p.year}-${p.month}-${p.day}`;
+}
+
+function dateInNigeria(value) {
+  if (!value) return "";
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: TZ,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(date);
+
+  const p = {};
+  for (const item of parts) {
+    if (item.type !== "literal") p[item.type] = item.value;
+  }
+
+  return `${p.year}-${p.month}-${p.day}`;
+}
+
+function isTodayNigeria(value) {
+  return dateInNigeria(value) === todayNigeria();
+}
+
+function sendError(res, status, message, extra = {}) {
+  return res.status(status).json({
+    success: false,
+    error: message,
+    ...extra
+  });
+}
 
 function normalizeText(value) {
   return String(value || "")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
-    .replace(/&/g, " and ")
-    .replace(/\b(fc|cf|sc|ac|af|as|ss|ssc|cfc|bc|ec|fr|calcio|football club|club de futebol)\b/g, " ")
+    .replace(/&/g, "and")
     .replace(/[^a-z0-9]+/g, " ")
     .trim()
     .replace(/\s+/g, " ");
 }
 
-function canonicalTeamName(value) {
-  const name = normalizeText(value);
-
-  for (const [canonical, aliases] of Object.entries(TEAM_ALIASES)) {
-    const all = [canonical, ...aliases].map(normalizeText);
-
-    if (all.includes(name)) {
-      return normalizeText(canonical);
-    }
-  }
-
-  return name;
+function safeNumber(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
 }
 
-function teamsMatch(a, b) {
-  const first = canonicalTeamName(a);
-  const second = canonicalTeamName(b);
-
-  if (!first || !second) return false;
-  if (first === second) return true;
-
-  const compactFirst = first.replace(/\s/g, "");
-  const compactSecond = second.replace(/\s/g, "");
-
-  if (compactFirst === compactSecond) return true;
-
-  // Avoid matching very short team names by substring alone.
-  const firstWords = first.split(" ").filter(Boolean);
-  const secondWords = second.split(" ").filter(Boolean);
-
-  if (
-    firstWords.length > 1 &&
-    secondWords.length > 1 &&
-    (first.includes(second) || second.includes(first))
-  ) {
-    return true;
-  }
-
-  return false;
-}
-
-function getSportKey(league, suppliedSport) {
-  if (suppliedSport && String(suppliedSport).startsWith("soccer_")) {
-    return suppliedSport;
-  }
-
-  const normalized = normalizeText(league);
-
-  const aliases = {
-    "premier league": "soccer_epl",
-    "english premier league": "soccer_epl",
-    "championship": "soccer_efl_champ",
-    "english championship": "soccer_efl_champ",
-    "la liga": "soccer_spain_la_liga",
-    "spanish la liga": "soccer_spain_la_liga",
-    "serie a": "soccer_italy_serie_a",
-    "italian serie a": "soccer_italy_serie_a",
-    "bundesliga": "soccer_germany_bundesliga",
-    "ligue 1": "soccer_france_ligue_one",
-    "french ligue 1": "soccer_france_ligue_one",
-    "champions league": "soccer_uefa_champs_league",
-    "uefa champions league": "soccer_uefa_champs_league",
-    "europa league": "soccer_uefa_europa_league",
-    "primeira liga": "soccer_portugal_primeira_liga",
-    "portuguese primeira liga": "soccer_portugal_primeira_liga",
-    "portugal first league": "soccer_portugal_primeira_liga",
-    "eredivisie": "soccer_netherlands_eredivisie",
-    "netherlands first league": "soccer_netherlands_eredivisie",
-    "dutch eredivisie": "soccer_netherlands_eredivisie",
-    "campeonato brasileiro serie a": "soccer_brazil_campeonato",
-    "brazilian serie a": "soccer_brazil_campeonato",
-    "brazil first league": "soccer_brazil_campeonato",
-    "fifa world cup": "soccer_fifa_world_cup",
-    "world cup": "soccer_fifa_world_cup",
-    "european championship": "soccer_uefa_european_championship",
-    "euro": "soccer_uefa_european_championship"
+function getTeamNames(pick) {
+  return {
+    home: pick.home || pick.home_team || "",
+    away: pick.away || pick.away_team || ""
   };
+}
 
-  if (aliases[normalized]) return aliases[normalized];
+function getEventId(pick) {
+  return String(
+    pick.event_id ||
+    pick.odds_event_id ||
+    pick.oddsApiEventId ||
+    ""
+  ).trim();
+}
 
-  const competition = COMPETITIONS.find(c =>
-    c.code.toLowerCase() === String(league || "").toLowerCase()
+function getSportKey(pick) {
+  return String(
+    pick.sport_key ||
+    pick.sportKey ||
+    ""
+  ).trim();
+}
+
+function getMarketKey(pick) {
+  return String(
+    pick.market_key ||
+    pick.marketKey ||
+    "h2h"
+  ).trim().toLowerCase();
+}
+
+function getSelection(pick) {
+  return String(
+    pick.outcome ||
+    pick.selection ||
+    pick.choice ||
+    ""
+  ).trim();
+}
+
+function getSavedOdds(pick) {
+  const odds = safeNumber(
+    pick.odds ??
+    pick.decimal_odds ??
+    pick.price
   );
 
-  return competition ? competition.sport : null;
+  return odds !== null && odds > 1 ? odds : null;
 }
+
+function getKickoff(pick) {
+  return pick.kickoff || pick.commence_time || pick.date || null;
+}
+
+/* -------------------------------------------------------
+   EXTERNAL API HELPERS
+------------------------------------------------------- */
 
 async function oddsRequest(path, params = {}) {
   if (!ODDS_API_KEY) {
-    throw new Error("ODDS_API_KEY is not configured in Render.");
+    throw new Error("ODDS_API_KEY is missing in Render environment variables.");
   }
 
-  const query = new URLSearchParams({
-    ...params,
-    apiKey: ODDS_API_KEY
-  });
+  const url = new URL(`${ODDS_BASE}${path}`);
 
-  const response = await fetch(`${ODDS_BASE}${path}?${query}`);
+  url.searchParams.set("apiKey", ODDS_API_KEY);
 
-  const body = await response.json().catch(() => null);
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== null && value !== "") {
+      url.searchParams.set(key, String(value));
+    }
+  }
+
+  const response = await fetch(url.toString());
+  const text = await response.text();
+
+  let data;
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    data = { message: text };
+  }
 
   if (!response.ok) {
-    const message = body?.message || body?.error || `Odds API HTTP ${response.status}`;
-    throw new Error(message);
+    const message =
+      data.message ||
+      data.error ||
+      `The Odds API returned HTTP ${response.status}`;
+
+    const error = new Error(message);
+    error.status = response.status;
+    throw error;
   }
 
   return {
-    data: body,
-    requestsRemaining: response.headers.get("x-requests-remaining"),
-    requestsUsed: response.headers.get("x-requests-used")
+    data,
+    remaining: response.headers.get("x-requests-remaining"),
+    used: response.headers.get("x-requests-used"),
+    last: response.headers.get("x-requests-last")
   };
 }
 
 async function supabaseRequest(path, options = {}) {
   if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-    throw new Error("Supabase environment variables are not configured.");
+    throw new Error(
+      "Supabase is not configured. Check SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in Render."
+    );
   }
 
-  const response = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+  const url = `${SUPABASE_URL}/rest/v1/${path}`;
+
+  const response = await fetch(url, {
     method: options.method || "GET",
     headers: {
       apikey: SUPABASE_SERVICE_ROLE_KEY,
@@ -216,290 +210,202 @@ async function supabaseRequest(path, options = {}) {
       Prefer: options.prefer || "return=representation",
       ...(options.headers || {})
     },
-    body: options.body === undefined ? undefined : JSON.stringify(options.body)
+    body: options.body === undefined
+      ? undefined
+      : JSON.stringify(options.body)
   });
 
   const text = await response.text();
-  let result = null;
 
+  let data;
   try {
-    result = text ? JSON.parse(text) : null;
+    data = text ? JSON.parse(text) : null;
   } catch {
-    result = text;
+    data = text;
   }
 
   if (!response.ok) {
-    const message =
-      result?.message ||
-      result?.hint ||
-      result?.details ||
-      `Supabase HTTP ${response.status}`;
-
-    throw new Error(message);
+    throw new Error(
+      `Supabase HTTP ${response.status}: ${
+        typeof data === "string" ? data : JSON.stringify(data)
+      }`
+    );
   }
 
-  return result;
+  return data;
 }
 
-function getTeamNames(pick) {
-  const fixture = pick.fixture || {};
-  const match = pick.match || {};
+/* -------------------------------------------------------
+   ODDS NORMALIZATION
+------------------------------------------------------- */
+
+function marketLabel(key) {
+  const labels = {
+    h2h: "Match Result",
+    totals: "Over/Under",
+    btts: "Both Teams to Score",
+    spreads: "Handicap",
+    draw_no_bet: "Draw No Bet",
+    double_chance: "Double Chance",
+    h2h_3_way: "Home / Draw / Away"
+  };
+
+  return labels[key] || key.replace(/_/g, " ");
+}
+
+function getBestMarkets(event) {
+  const collected = {};
+
+  for (const bookmaker of event.bookmakers || []) {
+    for (const market of bookmaker.markets || []) {
+      const key = market.key;
+
+      if (!collected[key]) {
+        collected[key] = {
+          market_key: key,
+          market_name: marketLabel(key),
+          outcomes: [],
+          bookmaker: bookmaker.title || bookmaker.key
+        };
+      }
+
+      const existing = new Map(
+        collected[key].outcomes.map(o => [
+          `${normalizeText(o.name)}|${o.point ?? ""}`,
+          o
+        ])
+      );
+
+      for (const outcome of market.outcomes || []) {
+        const price = safeNumber(outcome.price);
+        if (price === null || price <= 1) continue;
+
+        const identity =
+          `${normalizeText(outcome.name)}|${outcome.point ?? ""}`;
+
+        const previous = existing.get(identity);
+
+        // Keep the highest valid price found for each outcome.
+        if (!previous || price > previous.price) {
+          existing.set(identity, {
+            name: outcome.name,
+            price,
+            ...(outcome.point !== undefined
+              ? { point: outcome.point }
+              : {})
+          });
+        }
+      }
+
+      collected[key].outcomes = Array.from(existing.values());
+    }
+  }
+
+  return collected;
+}
+
+function normalizeEvent(event) {
+  const markets = getBestMarkets(event);
+  const h2h = markets.h2h || markets.h2h_3_way;
+
+  let homeOdds = null;
+  let drawOdds = null;
+  let awayOdds = null;
+
+  if (h2h) {
+    for (const outcome of h2h.outcomes) {
+      const name = normalizeText(outcome.name);
+
+      if (name === normalizeText(event.home_team)) {
+        homeOdds = outcome.price;
+      } else if (name === normalizeText(event.away_team)) {
+        awayOdds = outcome.price;
+      } else if (name === "draw") {
+        drawOdds = outcome.price;
+      }
+    }
+  }
+
+  const marketArray = Object.values(markets);
 
   return {
-    home:
-      pick.home ||
-      pick.home_team ||
-      pick.homeTeam ||
-      pick.homeTeamName ||
-      match.home ||
-      match.home_team ||
-      fixture.home_team ||
-      fixture.homeTeam ||
-      "",
-    away:
-      pick.away ||
-      pick.away_team ||
-      pick.awayTeam ||
-      pick.awayTeamName ||
-      match.away ||
-      match.away_team ||
-      fixture.away_team ||
-      fixture.awayTeam ||
-      ""
+    id: event.id,
+    event_id: event.id,
+    fixture_id: event.id,
+    sport_key: event.sport_key,
+    sport_title: event.sport_title,
+    league: event.sport_title,
+    home: event.home_team,
+    away: event.away_team,
+    home_team: event.home_team,
+    away_team: event.away_team,
+    date: event.commence_time,
+    kickoff: event.commence_time,
+    commence_time: event.commence_time,
+    status: event.completed ? "FINISHED" : "TIMED",
+
+    // Compatibility with the existing frontend.
+    odds: {
+      home: homeOdds,
+      draw: drawOdds,
+      away: awayOdds
+    },
+    home_odds: homeOdds,
+    draw_odds: drawOdds,
+    away_odds: awayOdds,
+
+    // Full markets and prices actually returned by the provider.
+    markets,
+    market_list: marketArray
   };
 }
 
-function getPickKickoff(pick) {
-  const match = pick.match || {};
-  const fixture = pick.fixture || {};
-
-  const value =
-    pick.kickoff ||
-    pick.kickoff_time ||
-    pick.commence_time ||
-    pick.start_time ||
-    pick.date ||
-    pick.match_date ||
-    pick.matchDate ||
-    match.kickoff ||
-    match.commence_time ||
-    match.date ||
-    fixture.kickoff ||
-    fixture.commence_time ||
-    fixture.date ||
-    null;
-
-  if (!value) return null;
-
-  const timestamp = Date.parse(value);
-  return Number.isFinite(timestamp) ? timestamp : null;
-}
-
-function getSavedEventId(pick) {
-  const match = pick.match || {};
-  const fixture = pick.fixture || {};
-
-  return (
-    pick.odds_event_id ||
-    pick.event_id ||
-    pick.eventId ||
-    pick.fixture_id ||
-    pick.fixtureId ||
-    match.odds_event_id ||
-    match.event_id ||
-    fixture.odds_event_id ||
-    fixture.event_id ||
-    null
-  );
-}
-
-function getFinalOutcome(event) {
-  if (!event || event.completed !== true) return null;
-
-  const scores = event.scores;
-
-  if (!Array.isArray(scores) || scores.length < 2) {
-    return null;
-  }
-
-  const homeScore = scores.find(score =>
-    teamsMatch(score.name, event.home_team)
-  );
-
-  const awayScore = scores.find(score =>
-    teamsMatch(score.name, event.away_team)
-  );
-
-  if (!homeScore || !awayScore) return null;
-
-  const home = Number(homeScore.score);
-  const away = Number(awayScore.score);
-
-  if (!Number.isFinite(home) || !Number.isFinite(away)) {
-    return null;
-  }
-
-  if (home > away) return "home";
-  if (away > home) return "away";
-
-  return "draw";
-}
-
-function normalizeChoice(value) {
-  const choice = normalizeText(value);
-
-  if (["home", "1", "home win", "team a"].includes(choice)) return "home";
-  if (["draw", "x", "tie", "equal"].includes(choice)) return "draw";
-  if (["away", "2", "away win", "team b"].includes(choice)) return "away";
-
-  return null;
-}
-
-function findMatchingEvent(pick, events) {
-  const { home, away } = getTeamNames(pick);
-
-  if (!home || !away || !Array.isArray(events)) {
-    return null;
-  }
-
-  const pickTime = getPickKickoff(pick);
-  const savedId = getSavedEventId(pick);
-
-  // First choice: exact event ID, but only if the event is completed
-  // and its final score is usable.
-  if (savedId) {
-    const byId = events.find(event =>
-      String(event.id) === String(savedId)
-    );
-
-    if (
-      byId &&
-      byId.completed === true &&
-      getFinalOutcome(byId) !== null &&
-      teamsMatch(home, byId.home_team) &&
-      teamsMatch(away, byId.away_team)
-    ) {
-      return byId;
-    }
-  }
-
-  // Never grade a fixture that has not been marked completed.
-  const candidates = events.filter(event =>
-    event.completed === true &&
-    teamsMatch(home, event.home_team) &&
-    teamsMatch(away, event.away_team) &&
-    getFinalOutcome(event) !== null
-  );
-
-  if (!candidates.length) return null;
-
-  // If the saved pick has a kickoff time, use it to avoid matching
-  // the same teams' fixture from a different date.
-  if (pickTime !== null) {
-    const timed = candidates
-      .map(event => {
-        const eventTime = Date.parse(event.commence_time || "");
-
-        return {
-          event,
-          difference: Number.isFinite(eventTime)
-            ? Math.abs(pickTime - eventTime)
-            : Infinity
-        };
-      })
-      .filter(item => item.difference <= MATCH_WINDOW_MS)
-      .sort((a, b) => a.difference - b.difference);
-
-    if (!timed.length) return null;
-
-    // If two possible fixtures are too close in time, do not guess.
-    if (
-      timed.length > 1 &&
-      timed[1].difference - timed[0].difference < 60 * 60 * 1000
-    ) {
-      return null;
-    }
-
-    return timed[0].event;
-  }
-
-  // Without a saved kickoff, accept only one unambiguous completed match.
-  return candidates.length === 1 ? candidates[0] : null;
-}
-
-function getPickChoice(pick) {
-  return normalizeChoice(
-    pick.choice ||
-    pick.prediction ||
-    pick.selection ||
-    pick.pick ||
-    pick.outcome
-  );
-}
-
-function getPickLeague(pick) {
-  return (
-    pick.league ||
-    pick.competition ||
-    pick.league_name ||
-    pick.competition_name ||
-    pick.leagueCode ||
-    pick.competitionCode ||
-    ""
-  );
-}
-
-function getPickSport(pick) {
-  return (
-    pick.sport_key ||
-    pick.sportKey ||
-    pick.sport ||
-    pick.odds_sport ||
-    ""
-  );
-}
-
-function safeDate(value) {
-  if (!value) return null;
-
-  const timestamp = Date.parse(value);
-  return Number.isFinite(timestamp)
-    ? new Date(timestamp).toISOString()
-    : null;
-}
-
-// ------------------------------------------------------
-// GENERAL ROUTES
-// ------------------------------------------------------
+/* -------------------------------------------------------
+   API ROUTES
+------------------------------------------------------- */
 
 app.get("/", (req, res) => {
   res.json({
-    name: "FootStats Backend",
+    name: "FootStats Prediction Challenge Backend",
     status: "online",
     provider: "The Odds API",
+    timezone: TZ,
+    predictionDate: todayNigeria(),
     endpoints: [
       "/api/health",
       "/api/diagnostic",
       "/api/competitions",
       "/api/odds/sports",
-      "/api/odds?sport=soccer_italy_serie_a",
+      "/api/odds?sport=soccer_epl",
       "/api/fixtures",
-      "/api/scores?sport=soccer_italy_serie_a&daysFrom=3",
-      "/api/leaderboard",
-      "POST /api/score-predictions"
+      "/api/scores",
+      "/api/score-predictions",
+      "/api/leaderboard"
     ]
   });
 });
 
 app.get("/api/health", (req, res) => {
-  res.json({ success: true, status: "online" });
+  res.json({
+    success: true,
+    status: "online",
+    provider: "The Odds API",
+    timezone: TZ,
+    predictionDate: todayNigeria(),
+    oddsConfigured: Boolean(ODDS_API_KEY),
+    supabaseConfigured: Boolean(
+      SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY
+    )
+  });
 });
 
-app.get("/api/diagnostic", (req, res) => {
+app.get("/api/diagnostic", async (req, res) => {
   res.json({
     success: true,
     provider: "The Odds API",
-    apiKeyConfigured: Boolean(ODDS_API_KEY),
+    timezone: TZ,
+    predictionDate: todayNigeria(),
+    oddsApiKeyConfigured: Boolean(ODDS_API_KEY),
     supabaseConfigured: Boolean(
       SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY
     ),
@@ -507,467 +413,616 @@ app.get("/api/diagnostic", (req, res) => {
   });
 });
 
-app.get("/api/competitions", (req, res) => {
-  res.json({
-    success: true,
-    provider: "The Odds API",
-    competitionsReturned: COMPETITIONS.length,
-    competitions: COMPETITIONS
-  });
-});
-
-// ------------------------------------------------------
-// ODDS API ROUTES
-// ------------------------------------------------------
-
 app.get("/api/odds/sports", async (req, res) => {
   try {
-    const result = await oddsRequest("/sports", { all: "true" });
+    const result = await oddsRequest("/sports", {
+      all: "false"
+    });
+
+    const sports = (result.data || [])
+      .filter(sport => sport.active !== false)
+      .map(sport => ({
+        key: sport.key,
+        title: sport.title,
+        group: sport.group,
+        description: sport.description,
+        active: sport.active
+      }));
 
     res.json({
       success: true,
-      count: Array.isArray(result.data) ? result.data.length : 0,
-      requestsRemaining: result.requestsRemaining,
-      sports: result.data
+      provider: "The Odds API",
+      sports,
+      count: sports.length,
+      requestsRemaining: result.remaining
     });
   } catch (error) {
-    res.status(502).json({
-      success: false,
-      error: error.message
-    });
+    sendError(res, error.status || 502, error.message);
   }
 });
 
+app.get("/api/competitions", async (req, res) => {
+  try {
+    const result = await oddsRequest("/sports", {
+      all: "false"
+    });
+
+    const competitions = (result.data || [])
+      .filter(sport =>
+        sport.active !== false &&
+        String(sport.key).startsWith("soccer_")
+      )
+      .map(sport => ({
+        id: sport.key,
+        key: sport.key,
+        name: sport.title,
+        title: sport.title,
+        group: sport.group
+      }));
+
+    res.json({
+      success: true,
+      provider: "The Odds API",
+      competitionsReturned: competitions.length,
+      competitions
+    });
+  } catch (error) {
+    sendError(res, error.status || 502, error.message);
+  }
+});
+
+/*
+ * Fetch odds from the actual odds endpoint.
+ * This is NOT the scores endpoint.
+ *
+ * Supported markets depend on the competition and provider coverage.
+ */
 app.get("/api/odds", async (req, res) => {
   try {
-    const sport = req.query.sport || "soccer_epl";
+    const sport = String(req.query.sport || "").trim();
 
-    const result = await oddsRequest(`/sports/${encodeURIComponent(sport)}/odds`, {
-      regions: req.query.regions || "uk",
-      markets: req.query.markets || "h2h",
-      oddsFormat: req.query.oddsFormat || "decimal",
-      dateFormat: "iso"
-    });
+    if (!sport) {
+      return sendError(
+        res,
+        400,
+        "Missing sport parameter. Example: /api/odds?sport=soccer_epl"
+      );
+    }
+
+    const regions = String(req.query.regions || "uk").trim();
+
+    const requestedMarkets = String(
+      req.query.markets || "h2h,totals,btts,spreads"
+    )
+      .split(",")
+      .map(s => s.trim())
+      .filter(Boolean)
+      .join(",");
+
+    const result = await oddsRequest(
+      `/sports/${encodeURIComponent(sport)}/odds`,
+      {
+        regions,
+        markets: requestedMarkets,
+        oddsFormat: "decimal",
+        dateFormat: "iso"
+      }
+    );
+
+    const matches = (result.data || []).map(normalizeEvent);
 
     res.json({
       success: true,
+      provider: "The Odds API",
       sport,
-      count: Array.isArray(result.data) ? result.data.length : 0,
-      requestsRemaining: result.requestsRemaining,
-      matches: result.data
+      date: todayNigeria(),
+      count: matches.length,
+      matches,
+      requestsRemaining: result.remaining,
+      requestsUsed: result.used
     });
   } catch (error) {
-    res.status(502).json({
-      success: false,
-      error: error.message
-    });
+    sendError(res, error.status || 502, error.message);
   }
 });
 
-// ------------------------------------------------------
-// FIXTURES AND SCORES
-// ------------------------------------------------------
+/*
+ * Prediction Challenge fixtures:
+ * only future matches scheduled for today's date in Nigeria.
+ */
+app.get("/api/fixtures", async (req, res) => {
+  try {
+    const sportsResult = await oddsRequest("/sports", {
+      all: "false"
+    });
 
+    const sports = (sportsResult.data || []).filter(s =>
+      s.active !== false &&
+      String(s.key).startsWith("soccer_")
+    );
+
+    const limit = Math.min(
+      Math.max(parseInt(req.query.limit || "10", 10) || 10, 1),
+      20
+    );
+
+    const selectedSports = sports.slice(0, limit);
+
+    const results = await Promise.allSettled(
+      selectedSports.map(async sport => {
+        const result = await oddsRequest(
+          `/sports/${encodeURIComponent(sport.key)}/odds`,
+          {
+            regions: "uk",
+            markets: "h2h",
+            oddsFormat: "decimal",
+            dateFormat: "iso"
+          }
+        );
+
+        return (result.data || []).map(normalizeEvent);
+      })
+    );
+
+    const matches = [];
+    const errors = [];
+
+    results.forEach((result, index) => {
+      if (result.status === "fulfilled") {
+        matches.push(...result.value);
+      } else {
+        errors.push({
+          sport: selectedSports[index].key,
+          error: result.reason?.message || "Request failed"
+        });
+      }
+    });
+
+    const now = Date.now();
+
+    const todaysMatches = matches
+      .filter(match => {
+        const kickoff = new Date(match.kickoff).getTime();
+
+        return (
+          Number.isFinite(kickoff) &&
+          kickoff > now &&
+          isTodayNigeria(match.kickoff)
+        );
+      })
+      .sort((a, b) =>
+        new Date(a.kickoff) - new Date(b.kickoff)
+      );
+
+    // Remove duplicate events if a provider response repeats an event.
+    const unique = [];
+    const seen = new Set();
+
+    for (const match of todaysMatches) {
+      if (seen.has(match.event_id)) continue;
+      seen.add(match.event_id);
+      unique.push(match);
+    }
+
+    res.json({
+      success: true,
+      provider: "The Odds API",
+      timezone: TZ,
+      date: todayNigeria(),
+      count: unique.length,
+      matches: unique,
+      errors
+    });
+  } catch (error) {
+    sendError(res, error.status || 502, error.message);
+  }
+});
+
+/*
+ * Scores route:
+ * can be called with ?sport=soccer_epl
+ */
 app.get("/api/scores", async (req, res) => {
   try {
-    const sport = req.query.sport || "soccer_epl";
-    const requestedDays = Number.parseInt(req.query.daysFrom || "3", 10);
-    const daysFrom = Math.max(1, Math.min(3, Number.isFinite(requestedDays) ? requestedDays : 3));
+    const sport = String(req.query.sport || "").trim();
+
+    if (!sport) {
+      return sendError(
+        res,
+        400,
+        "Missing sport parameter. Example: /api/scores?sport=soccer_epl"
+      );
+    }
 
     const result = await oddsRequest(
       `/sports/${encodeURIComponent(sport)}/scores`,
       {
-        daysFrom: String(daysFrom),
+        daysFrom: "3",
         dateFormat: "iso"
       }
     );
 
     res.json({
       success: true,
-      sport,
-      daysFrom,
-      count: Array.isArray(result.data) ? result.data.length : 0,
-      requestsRemaining: result.requestsRemaining,
-      scores: result.data
-    });
-  } catch (error) {
-    res.status(502).json({
-      success: false,
-      error: error.message
-    });
-  }
-});
-
-app.get("/api/fixtures", async (req, res) => {
-  try {
-    const requestedLeague = req.query.league;
-    const requestedSport = req.query.sport;
-
-    let competitions = COMPETITIONS;
-
-    if (requestedLeague) {
-      const normalizedLeague = normalizeText(requestedLeague);
-
-      competitions = COMPETITIONS.filter(competition =>
-        normalizeText(competition.code) === normalizedLeague ||
-        normalizeText(competition.name) === normalizedLeague ||
-        normalizeText(competition.sport) === normalizedLeague
-      );
-
-      if (!competitions.length) {
-        const sport = getSportKey(requestedLeague, requestedSport);
-
-        if (sport) {
-          competitions = [{
-            code: requestedLeague,
-            name: requestedLeague,
-            country: "",
-            sport
-          }];
-        }
-      }
-    } else if (requestedSport) {
-      const sport = getSportKey("", requestedSport);
-
-      competitions = sport
-        ? [{ code: requestedSport, name: requestedSport, country: "", sport }]
-        : [];
-    }
-
-    if (!competitions.length) {
-      return res.status(400).json({
-        success: false,
-        error: "Unknown competition or sport.",
-        competitions: COMPETITIONS
-      });
-    }
-
-    const from = req.query.from ? Date.parse(req.query.from) : null;
-    const to = req.query.to ? Date.parse(req.query.to + (String(req.query.to).length === 10 ? "T23:59:59Z" : "")) : null;
-    const requestedDate = req.query.date ? String(req.query.date).slice(0, 10) : null;
-
-    const results = await Promise.all(
-      competitions.map(async competition => {
-        try {
-          const result = await oddsRequest(
-            `/sports/${encodeURIComponent(competition.sport)}/scores`,
-            { daysFrom: "3", dateFormat: "iso" }
-          );
-
-          const matches = (Array.isArray(result.data) ? result.data : [])
-            .filter(event => {
-              const kickoff = Date.parse(event.commence_time || "");
-
-              if (!Number.isFinite(kickoff)) return true;
-              if (requestedDate && new Date(kickoff).toISOString().slice(0, 10) !== requestedDate) return false;
-              if (from !== null && Number.isFinite(from) && kickoff < from) return false;
-              if (to !== null && Number.isFinite(to) && kickoff > to) return false;
-
-              return true;
-            })
-            .map(event => ({
-              ...event,
-              competition: {
-                code: competition.code,
-                name: competition.name,
-                country: competition.country
-              }
-            }));
-
-          return {
-            competition,
-            matches,
-            error: null,
-            requestsRemaining: result.requestsRemaining
-          };
-        } catch (error) {
-          return {
-            competition,
-            matches: [],
-            error: error.message,
-            requestsRemaining: null
-          };
-        }
-      })
-    );
-
-    const responseMatches = results.flatMap(result => result.matches);
-
-    responseMatches.sort((a, b) =>
-      Date.parse(a.commence_time || 0) - Date.parse(b.commence_time || 0)
-    );
-
-    res.json({
-      success: true,
       provider: "The Odds API",
-      from: req.query.from || null,
-      to: req.query.to || null,
-      date: requestedDate,
-      competition: requestedLeague || null,
-      results: responseMatches.length,
-      response: responseMatches,
-      competitions: results.map(result => ({
-        code: result.competition.code,
-        name: result.competition.name,
-        results: result.matches.length,
-        error: result.error,
-        requestsRemaining: result.requestsRemaining
-      }))
+      sport,
+      count: (result.data || []).length,
+      scores: result.data || [],
+      requestsRemaining: result.remaining
     });
   } catch (error) {
-    res.status(502).json({
-      success: false,
-      error: error.message
-    });
+    sendError(res, error.status || 502, error.message);
   }
 });
 
-// ------------------------------------------------------
-// PREDICTION SCORING
-// ------------------------------------------------------
+/* -------------------------------------------------------
+   RESULT SETTLEMENT
+------------------------------------------------------- */
 
-app.post("/api/score-predictions", async (req, res) => {
-  try {
-    if (!SCORING_SECRET) {
-      return res.status(500).json({
-        success: false,
-        error: "SCORING_SECRET is not configured in Render."
-      });
-    }
+function readScores(event) {
+  const scores = event.scores || [];
 
-    const suppliedSecret = req.get("x-scoring-secret");
+  const homeEntry = scores.find(s =>
+    normalizeText(s.name) === normalizeText(event.home_team)
+  );
 
-    if (!suppliedSecret || suppliedSecret !== SCORING_SECRET) {
-      return res.status(401).json({
-        success: false,
-        error: "Unauthorized scoring request."
-      });
-    }
+  const awayEntry = scores.find(s =>
+    normalizeText(s.name) === normalizeText(event.away_team)
+  );
 
-    const entries = await supabaseRequest(
-      "prediction_entries?select=id,user_id,picks,point,status&status=eq.pending&limit=500"
+  if (!homeEntry || !awayEntry) return null;
+
+  const home = safeNumber(homeEntry.score);
+  const away = safeNumber(awayEntry.score);
+
+  if (home === null || away === null) return null;
+
+  return { home, away };
+}
+
+function normalizeH2HSelection(selection, homeName, awayName) {
+  const s = normalizeText(selection);
+
+  if (["h", "home", "1"].includes(s)) return "H";
+  if (["d", "draw", "x"].includes(s)) return "D";
+  if (["a", "away", "2"].includes(s)) return "A";
+
+  if (s === normalizeText(homeName)) return "H";
+  if (s === normalizeText(awayName)) return "A";
+
+  return null;
+}
+
+/*
+ * Returns true, false, or null.
+ * null means this backend cannot safely settle this market/selection.
+ */
+function settlePick(pick, event) {
+  if (!event || event.completed !== true) return null;
+
+  const score = readScores(event);
+  if (!score) return null;
+
+  const homeName = event.home_team || getTeamNames(pick).home;
+  const awayName = event.away_team || getTeamNames(pick).away;
+
+  const market = getMarketKey(pick);
+  const selection = getSelection(pick);
+
+  const { home, away } = score;
+
+  if (market === "h2h" || market === "h2h_3_way") {
+    const selected = normalizeH2HSelection(
+      selection,
+      homeName,
+      awayName
     );
 
-    if (!Array.isArray(entries)) {
-      throw new Error("Supabase did not return a valid prediction-entry list.");
+    if (!selected) return null;
+
+    const actual = home > away ? "H" : home < away ? "A" : "D";
+    return selected === actual;
+  }
+
+  if (market === "totals") {
+    const s = normalizeText(selection);
+    const total = home + away;
+
+    const match = s.match(/^(over|under)\s*(\d+(?:\.\d+)?)$/);
+
+    if (!match) return null;
+
+    const line = Number(match[2]);
+
+    if (match[1] === "over") return total > line;
+    return total < line;
+  }
+
+  if (market === "btts") {
+    const s = normalizeText(selection);
+
+    const yes = ["yes", "btts yes", "both teams to score yes"];
+    const no = ["no", "btts no", "both teams to score no"];
+
+    if (yes.includes(s)) return home > 0 && away > 0;
+    if (no.includes(s)) return home === 0 || away === 0;
+
+    return null;
+  }
+
+  // Other markets are deliberately not graded with guessed rules.
+  return null;
+}
+
+function calculateTicket(picks, scoreEvents) {
+  if (!Array.isArray(picks) || picks.length === 0) {
+    return { state: "unresolved", reason: "Ticket has no selections." };
+  }
+
+  let totalPoints = 0;
+  let anyLoss = false;
+  let allSettled = true;
+
+  const updatedPicks = picks.map(original => {
+    const pick = { ...original };
+    const eventId = getEventId(pick);
+    const sportKey = getSportKey(pick);
+
+    if (!eventId || !sportKey) {
+      allSettled = false;
+      pick.settlement_note =
+        "Legacy selection: missing exact Odds API event ID or sport key.";
+      return pick;
     }
 
-    let checked = 0;
+    const event = scoreEvents.get(`${sportKey}|${eventId}`);
+
+    if (!event || event.completed !== true) {
+      allSettled = false;
+      return pick;
+    }
+
+    const won = settlePick(pick, event);
+
+    if (won === null) {
+      allSettled = false;
+      pick.settlement_note =
+        "This market or selection could not be settled safely.";
+      return pick;
+    }
+
+    pick.result = won ? "won" : "lost";
+    pick.settled = true;
+    pick.final_score = readScores(event);
+    pick.settled_at = new Date().toISOString();
+
+    if (won) {
+      const odds = getSavedOdds(pick);
+
+      if (odds === null) {
+        // The result is known, but the required odds snapshot is missing.
+        // Do not invent points for a legacy selection.
+        allSettled = false;
+        pick.settlement_note =
+          "Final result found, but saved decimal odds are missing.";
+      } else {
+        totalPoints += (odds - 1) * POINTS_MULTIPLIER;
+      }
+    } else {
+      anyLoss = true;
+    }
+
+    return pick;
+  });
+
+  if (!allSettled) {
+    return {
+      state: "pending",
+      picks: updatedPicks,
+      reason: "Waiting for complete results or required saved data."
+    };
+  }
+
+  return {
+    state: "graded",
+    picks: updatedPicks,
+    points: anyLoss ? 0 : Math.round(totalPoints * 100) / 100,
+    anyLoss
+  };
+}
+
+async function fetchScoreEvents(sportKey) {
+  const result = await oddsRequest(
+    `/sports/${encodeURIComponent(sportKey)}/scores`,
+    {
+      daysFrom: "3",
+      dateFormat: "iso"
+    }
+  );
+
+  return result.data || [];
+}
+
+function scoringAuthorized(req) {
+  if (!SCORING_SECRET) return false;
+
+  const supplied =
+    req.get("x-scoring-secret") ||
+    req.get("authorization")?.replace(/^Bearer\s+/i, "") ||
+    "";
+
+  return supplied === SCORING_SECRET;
+}
+
+/*
+ * This endpoint should be called by your trusted scheduler.
+ *
+ * It uses exact Odds API event IDs. Old tickets without those IDs
+ * are left pending rather than matched by approximate team names.
+ */
+app.post("/api/score-predictions", async (req, res) => {
+  if (!scoringAuthorized(req)) {
+    return sendError(res, 401, "Unauthorized scoring request.");
+  }
+
+  try {
+    const entries = await supabaseRequest(
+      `${TABLE}?status=eq.pending&select=id,user_id,picks,point,points,status,created_at`,
+      { method: "GET" }
+    );
+
+    const pendingEntries = Array.isArray(entries) ? entries : [];
+
+    if (pendingEntries.length === 0) {
+      return res.json({
+        success: true,
+        message: "No pending prediction tickets.",
+        checked: 0,
+        graded: 0,
+        pending: 0,
+        skipped: 0,
+        pointsAwarded: 0
+      });
+    }
+
+    const sports = new Set();
+
+    for (const entry of pendingEntries) {
+      for (const pick of Array.isArray(entry.picks) ? entry.picks : []) {
+        const sportKey = getSportKey(pick);
+        if (sportKey && getEventId(pick)) sports.add(sportKey);
+      }
+    }
+
+    const scoreEvents = new Map();
+    const sportErrors = [];
+
+    for (const sportKey of sports) {
+      try {
+        const events = await fetchScoreEvents(sportKey);
+
+        for (const event of events) {
+          scoreEvents.set(`${sportKey}|${event.id}`, event);
+        }
+      } catch (error) {
+        sportErrors.push({
+          sport: sportKey,
+          error: error.message
+        });
+      }
+    }
+
     let graded = 0;
     let pending = 0;
     let skipped = 0;
     let pointsAwarded = 0;
 
-    const sportsChecked = new Set();
-    const sportErrors = [];
-
-    // Cache each sport's scores so the same API endpoint is not
-    // called repeatedly for every prediction entry.
-    const scoreCache = new Map();
-
-    async function loadScores(sport) {
-      if (scoreCache.has(sport)) return scoreCache.get(sport);
-
-      const promise = oddsRequest(
-        `/sports/${encodeURIComponent(sport)}/scores`,
-        { daysFrom: "3", dateFormat: "iso" }
-      )
-        .then(result => {
-          sportsChecked.add(sport);
-
-          return {
-            events: Array.isArray(result.data) ? result.data : [],
-            error: null
-          };
-        })
-        .catch(error => {
-          sportErrors.push({
-            sport,
-            error: error.message
-          });
-
-          return {
-            events: [],
-            error: error.message
-          };
-        });
-
-      scoreCache.set(sport, promise);
-      return promise;
-    }
-
-    for (const entry of entries) {
-      checked++;
-
+    for (const entry of pendingEntries) {
       const picks = Array.isArray(entry.picks) ? entry.picks : [];
 
-      if (!picks.length || picks.length > MAX_PICKS) {
+      if (!picks.length) {
         skipped++;
         continue;
       }
 
-      let correct = 0;
-      let unresolved = 0;
-      let invalidSelections = 0;
+      const outcome = calculateTicket(picks, scoreEvents);
 
-      for (const pick of picks) {
-        const choice = getPickChoice(pick);
-
-        if (!choice) {
-          invalidSelections++;
-          unresolved++;
-          continue;
-        }
-
-        const league = getPickLeague(pick);
-        const sport = getSportKey(league, getPickSport(pick));
-
-        if (!sport) {
-          unresolved++;
-          continue;
-        }
-
-        const { home, away } = getTeamNames(pick);
-
-        if (!home || !away) {
-          unresolved++;
-          continue;
-        }
-
-        const scoreResult = await loadScores(sport);
-
-        if (scoreResult.error) {
-          unresolved++;
-          continue;
-        }
-
-        const event = findMatchingEvent(pick, scoreResult.events);
-
-        if (!event) {
-          unresolved++;
-          continue;
-        }
-
-        const actualOutcome = getFinalOutcome(event);
-
-        if (!actualOutcome) {
-          unresolved++;
-          continue;
-        }
-
-        if (choice === actualOutcome) {
-          correct++;
-        }
-      }
-
-      // IMPORTANT:
-      // Do not grade a slip if even one selection has no reliable
-      // final result. This prevents premature or incorrect scoring.
-      if (unresolved > 0 || invalidSelections > 0) {
+      if (outcome.state !== "graded") {
         pending++;
-
         continue;
       }
 
-      const points = correct * POINTS_PER_PICK;
+      const points = outcome.points || 0;
 
-      await supabaseRequest(
-        `prediction_entries?id=eq.${encodeURIComponent(entry.id)}&status=eq.pending`,
+      /*
+       * Critical duplicate protection:
+       * update only while the row is still pending.
+       * Both columns receive the same final points value.
+       */
+      const updated = await supabaseRequest(
+        `${TABLE}?id=eq.${encodeURIComponent(entry.id)}&status=eq.pending`,
         {
           method: "PATCH",
+          prefer: "return=representation",
           body: {
+            picks: outcome.picks,
             point: points,
+            points: points,
             status: "graded"
-          },
-          prefer: "return=minimal"
+          }
         }
       );
 
-      graded++;
-      pointsAwarded += points;
+      if (Array.isArray(updated) && updated.length > 0) {
+        graded++;
+        pointsAwarded += points;
+      } else {
+        // Another scoring run may already have processed this ticket.
+        skipped++;
+      }
     }
 
-    // Keep this response compact for cron-job.org.
     res.json({
       success: true,
       message: "Prediction scoring check completed.",
-      checked,
+      checked: pendingEntries.length,
       graded,
       pending,
       skipped,
-      pointsAwarded,
-      sportsChecked: Array.from(sportsChecked),
+      pointsAwarded: Math.round(pointsAwarded * 100) / 100,
+      sportsChecked: Array.from(sports),
       sportErrors
     });
   } catch (error) {
-    console.error("Prediction scoring error:", error.message);
+    console.error("Scoring error:", error);
 
-    res.status(500).json({
-      success: false,
-      error: error.message
+    sendError(res, 500, "Prediction scoring failed.", {
+      details: error.message
     });
   }
 });
 
-// ------------------------------------------------------
-// LEADERBOARD
-// ------------------------------------------------------
+/* -------------------------------------------------------
+   LEADERBOARD
+------------------------------------------------------- */
 
 app.get("/api/leaderboard", async (req, res) => {
   try {
     const entries = await supabaseRequest(
-      "prediction_entries?select=id,user_id,point,status&status=eq.graded&limit=5000"
+      `${TABLE}?status=eq.graded&select=user_id,point,points,created_at`,
+      { method: "GET" }
     );
 
     const totals = new Map();
 
-    for (const entry of Array.isArray(entries) ? entries : []) {
+    for (const entry of entries || []) {
       const userId = entry.user_id;
-
       if (!userId) continue;
 
-      if (!totals.has(userId)) {
-        totals.set(userId, {
-          user_id: userId,
-          points: 0,
-          entries: 0
-        });
-      }
+      const points = safeNumber(entry.points ?? entry.point) || 0;
 
-      const item = totals.get(userId);
-      item.points += Number(entry.point) || 0;
-      item.entries++;
+      const existing = totals.get(userId) || {
+        user_id: userId,
+        points: 0,
+        tickets: 0
+      };
+
+      existing.points += points;
+      existing.tickets += 1;
+
+      totals.set(userId, existing);
     }
 
     const leaderboard = Array.from(totals.values())
+      .map(row => ({
+        ...row,
+        points: Math.round(row.points * 100) / 100
+      }))
       .sort((a, b) => b.points - a.points)
-      .map((item, index) => ({
+      .map((row, index) => ({
         rank: index + 1,
-        ...item
+        ...row
       }));
-
-    // Username lookup is optional so a profiles-table issue
-    // does not stop the points leaderboard from loading.
-    try {
-      const profiles = await supabaseRequest(
-        "profiles?select=id,username"
-      );
-
-      const usernames = new Map(
-        (Array.isArray(profiles) ? profiles : []).map(profile => [
-          String(profile.id),
-          profile.username || "Player"
-        ])
-      );
-
-      leaderboard.forEach(player => {
-        player.username = usernames.get(String(player.user_id)) || "Player";
-      });
-    } catch (profileError) {
-      leaderboard.forEach(player => {
-        player.username = "Player";
-      });
-    }
 
     res.json({
       success: true,
@@ -975,28 +1030,18 @@ app.get("/api/leaderboard", async (req, res) => {
       leaderboard
     });
   } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error.message
+    sendError(res, 502, "Could not load leaderboard.", {
+      details: error.message
     });
   }
 });
 
-// ------------------------------------------------------
-// ERROR HANDLING
-// ------------------------------------------------------
-
-app.use((req, res) => {
-  res.status(404).json({
-    success: false,
-    error: "Endpoint not found.",
-    path: req.path
-  });
-});
+/* -------------------------------------------------------
+   START SERVER
+------------------------------------------------------- */
 
 app.listen(PORT, () => {
-  console.log(`FootStats Backend running on port ${PORT}`);
-  console.log(`The Odds API configured: ${Boolean(ODDS_API_KEY)}`);
-  console.log(`Supabase configured: ${Boolean(SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY)}`);
-  console.log(`Scoring secret configured: ${Boolean(SCORING_SECRET)}`);
-});
+  console.log(`FootStats backend running on port ${PORT}`);
+  console.log(`Provider: The Odds API`);
+  console.log(`Nigeria prediction date: ${todayNigeria()}`);
+}); 
