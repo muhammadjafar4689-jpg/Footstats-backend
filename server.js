@@ -41,11 +41,15 @@ const FOOTBALL_LEAGUES = [
 // ========================================
 
 const getApiKey = () => process.env.ODDS_API_KEY || "";
+
 const getSupabaseUrl = () =>
   (process.env.SUPABASE_URL || "").replace(/\/+$/, "");
+
 const getSupabaseKey = () =>
   process.env.SUPABASE_SERVICE_ROLE_KEY || "";
-const getScoringSecret = () => process.env.SCORING_SECRET || "";
+
+const getScoringSecret = () =>
+  process.env.SCORING_SECRET || "";
 
 const hasSupabaseConfig = () =>
   Boolean(getSupabaseUrl() && getSupabaseKey());
@@ -64,8 +68,13 @@ function normalizeText(value) {
 }
 
 function sendApiError(res, status, message, details) {
-  const result = { success: false, error: message };
+  const result = {
+    success: false,
+    error: message
+  };
+
   if (details) result.details = details;
+
   return res.status(status).json(result);
 }
 
@@ -83,6 +92,7 @@ async function oddsRequest(path, params = {}) {
   }
 
   const url = new URL(`https://api.the-odds-api.com/v4${path}`);
+
   url.searchParams.set("apiKey", apiKey);
 
   for (const [key, value] of Object.entries(params)) {
@@ -96,6 +106,7 @@ async function oddsRequest(path, params = {}) {
   });
 
   const text = await response.text();
+
   let data;
 
   try {
@@ -110,6 +121,7 @@ async function oddsRequest(path, params = {}) {
         ? data.message
         : `The Odds API returned HTTP ${response.status}.`
     );
+
     error.status = response.status;
     throw error;
   }
@@ -130,6 +142,7 @@ async function supabaseRequest(table, query = "", options = {}) {
     const error = new Error(
       "Supabase environment variables are not configured."
     );
+
     error.status = 500;
     throw error;
   }
@@ -149,6 +162,7 @@ async function supabaseRequest(table, query = "", options = {}) {
   }
 
   const serviceKey = getSupabaseKey();
+
   const headers = {
     apikey: serviceKey,
     Authorization: `Bearer ${serviceKey}`,
@@ -159,7 +173,9 @@ async function supabaseRequest(table, query = "", options = {}) {
     headers["Content-Type"] = "application/json";
   }
 
-  if (options.prefer) headers.Prefer = options.prefer;
+  if (options.prefer) {
+    headers.Prefer = options.prefer;
+  }
 
   const response = await fetch(url.toString(), {
     method: options.method || "GET",
@@ -170,6 +186,7 @@ async function supabaseRequest(table, query = "", options = {}) {
   });
 
   const text = await response.text();
+
   let data = null;
 
   try {
@@ -184,8 +201,10 @@ async function supabaseRequest(table, query = "", options = {}) {
         ? data.message
         : `Supabase returned HTTP ${response.status}.`
     );
+
     error.status = response.status;
     error.details = data;
+
     throw error;
   }
 
@@ -208,45 +227,81 @@ function getSportKey(league, explicitSportKey) {
 
   const groups = {
     soccer_epl: [
-      "premier league", "english premier league", "epl"
+      "premier league",
+      "english premier league",
+      "epl"
     ],
+
     soccer_england_efl_champ: [
-      "championship", "english championship", "efl championship"
+      "championship",
+      "english championship",
+      "efl championship"
     ],
+
     soccer_spain_la_liga: [
-      "la liga", "laliga", "spanish la liga"
+      "la liga",
+      "laliga",
+      "spanish la liga"
     ],
+
     soccer_germany_bundesliga: [
-      "bundesliga", "german bundesliga"
+      "bundesliga",
+      "german bundesliga"
     ],
+
     soccer_italy_serie_a: [
-      "serie a", "italian serie a", "italy serie a"
+      "serie a",
+      "italian serie a",
+      "italy serie a"
     ],
+
     soccer_france_ligue_one: [
-      "ligue 1", "ligue one", "french ligue 1"
+      "ligue 1",
+      "ligue one",
+      "french ligue 1"
     ],
+
     soccer_portugal_primeira_liga: [
-      "primeira liga", "portugal first league",
-      "portuguese primeira liga", "liga portugal"
+      "primeira liga",
+      "portugal first league",
+      "portuguese primeira liga",
+      "liga portugal"
     ],
+
     soccer_netherlands_eredivisie: [
-      "eredivisie", "netherlands first league", "dutch eredivisie"
+      "eredivisie",
+      "netherlands first league",
+      "dutch eredivisie"
     ],
+
     soccer_brazil_campeonato: [
-      "brazil serie a", "brazilian serie a", "brasileirao",
-      "campeonato brasileiro serie a", "brasileirao serie a"
+      "brazil serie a",
+      "brazilian serie a",
+      "brasileirao",
+      "campeonato brasileiro serie a",
+      "brasileirao serie a"
     ],
+
     soccer_uefa_champs_league: [
-      "champions league", "uefa champions league", "ucl"
+      "champions league",
+      "uefa champions league",
+      "ucl"
     ],
+
     soccer_uefa_europa_league: [
-      "europa league", "uefa europa league"
+      "europa league",
+      "uefa europa league"
     ],
+
     soccer_uefa_european_championship: [
-      "european championship", "euro", "uefa euro"
+      "european championship",
+      "euro",
+      "uefa euro"
     ],
+
     soccer_fifa_world_cup: [
-      "world cup", "fifa world cup"
+      "world cup",
+      "fifa world cup"
     ]
   };
 
@@ -260,69 +315,221 @@ function getSportKey(league, explicitSportKey) {
 }
 
 // ========================================
-// IMPROVED TEAM-NAME MATCHING
+// TEAM-NAME MATCHING
 // ========================================
 
 const TEAM_ALIASES = {
   "atletico mineiro": [
-    "ca mineiro", "atletico mineiro", "atletico mg",
+    "ca mineiro",
+    "atletico mineiro",
+    "atletico mg",
     "atletico mineiro mg"
   ],
+
   "red bull bragantino": [
-    "rb bragantino", "bragantino", "bragantino sp",
-    "red bull bragantino", "bragantino sp"
+    "rb bragantino",
+    "bragantino",
+    "bragantino sp",
+    "red bull bragantino"
   ],
+
   "athletico paranaense": [
-    "athletico pr", "atletico paranaense",
+    "athletico pr",
+    "atletico paranaense",
     "athletico paranaense"
   ],
-  "gremio": ["gremio", "gremio fbpa"],
+
+  "gremio": [
+    "gremio",
+    "gremio fbpa"
+  ],
+
   "internacional": [
-    "internacional", "sc internacional", "internacional rs"
+    "internacional",
+    "sc internacional",
+    "internacional rs"
   ],
-  "palmeiras": ["palmeiras", "se palmeiras"],
-  "flamengo": ["flamengo", "cr flamengo"],
-  "corinthians": ["corinthians", "sc corinthians"],
-  "sao paulo": ["sao paulo", "sao paulo fc"],
-  "vasco da gama": ["vasco da gama", "cr vasco da gama", "vasco"],
-  "cruzeiro": ["cruzeiro", "cruzeiro ec"],
-  "botafogo": ["botafogo", "botafogo fr"],
-  "santos": ["santos", "santos fc"],
-  "bahia": ["bahia", "ec bahia"],
-  "fortaleza": ["fortaleza", "fortaleza ec"],
-  "fluminense": ["fluminense", "fluminense fc"],
-  "bologna": ["bologna", "bologna fc 1909"],
+
+  "palmeiras": [
+    "palmeiras",
+    "se palmeiras"
+  ],
+
+  "flamengo": [
+    "flamengo",
+    "cr flamengo"
+  ],
+
+  "corinthians": [
+    "corinthians",
+    "sc corinthians"
+  ],
+
+  "sao paulo": [
+    "sao paulo",
+    "sao paulo fc"
+  ],
+
+  "vasco da gama": [
+    "vasco da gama",
+    "cr vasco da gama",
+    "vasco"
+  ],
+
+  "cruzeiro": [
+    "cruzeiro",
+    "cruzeiro ec"
+  ],
+
+  "botafogo": [
+    "botafogo",
+    "botafogo fr"
+  ],
+
+  "santos": [
+    "santos",
+    "santos fc"
+  ],
+
+  "bahia": [
+    "bahia",
+    "ec bahia"
+  ],
+
+  "fortaleza": [
+    "fortaleza",
+    "fortaleza ec"
+  ],
+
+  "fluminense": [
+    "fluminense",
+    "fluminense fc"
+  ],
+
+  "bologna": [
+    "bologna",
+    "bologna fc 1909"
+  ],
+
   "inter milan": [
-    "inter milan", "fc internazionale milano",
-    "internazionale milano", "internazionale", "inter"
+    "inter milan",
+    "fc internazionale milano",
+    "internazionale milano",
+    "internazionale",
+    "inter"
   ],
-  "ac milan": ["ac milan", "milan"],
-  "genoa": ["genoa", "genoa cfc"],
-  "udinese": ["udinese", "udinese calcio"],
-  "parma": ["parma", "parma calcio 1913"],
-  "napoli": ["napoli", "ssc napoli"],
-  "monza": ["monza", "ac monza"],
-  "juventus": ["juventus", "juventus fc"],
+
+  "ac milan": [
+    "ac milan",
+    "milan"
+  ],
+
+  "genoa": [
+    "genoa",
+    "genoa cfc"
+  ],
+
+  "udinese": [
+    "udinese",
+    "udinese calcio"
+  ],
+
+  "parma": [
+    "parma",
+    "parma calcio 1913"
+  ],
+
+  "napoli": [
+    "napoli",
+    "ssc napoli"
+  ],
+
+  "monza": [
+    "monza",
+    "ac monza"
+  ],
+
+  "juventus": [
+    "juventus",
+    "juventus fc"
+  ],
+
   "fiorentina": [
-    "fiorentina", "ac fiorentina", "acf fiorentina"
+    "fiorentina",
+    "ac fiorentina",
+    "acf fiorentina"
   ],
-  "venezia": ["venezia", "venezia fc"],
-  "atalanta": ["atalanta", "atalanta bc"],
-  "roma": ["roma", "as roma"],
-  "cagliari": ["cagliari", "cagliari calcio"],
-  "lazio": ["lazio", "ss lazio"],
-  "sassuolo": ["sassuolo", "us sassuolo"],
-  "lecce": ["lecce", "us lecce"],
-  "frosinone": ["frosinone", "frosinone calcio"],
-  "lille": ["lille", "lille osc"],
-  "lens": ["lens", "racing club de lens"],
+
+  "venezia": [
+    "venezia",
+    "venezia fc"
+  ],
+
+  "atalanta": [
+    "atalanta",
+    "atalanta bc"
+  ],
+
+  "roma": [
+    "roma",
+    "as roma"
+  ],
+
+  "cagliari": [
+    "cagliari",
+    "cagliari calcio"
+  ],
+
+  "lazio": [
+    "lazio",
+    "ss lazio"
+  ],
+
+  "sassuolo": [
+    "sassuolo",
+    "us sassuolo"
+  ],
+
+  "lecce": [
+    "lecce",
+    "us lecce"
+  ],
+
+  "frosinone": [
+    "frosinone",
+    "frosinone calcio"
+  ],
+
+  "lille": [
+    "lille",
+    "lille osc"
+  ],
+
+  "lens": [
+    "lens",
+    "racing club de lens"
+  ],
+
   "sporting cp": [
-    "sporting cp", "sporting clube de portugal",
+    "sporting cp",
+    "sporting clube de portugal",
     "sporting portugal"
   ],
-  "casa pia": ["casa pia", "casa pia ac"],
-  "chapecoense": ["chapecoense", "chapecoense af"],
-  "remo": ["remo", "clube do remo"]
+
+  "casa pia": [
+    "casa pia",
+    "casa pia ac"
+  ],
+
+  "chapecoense": [
+    "chapecoense",
+    "chapecoense af"
+  ],
+
+  "remo": [
+    "remo",
+    "clube do remo"
+  ]
 };
 
 const TEAM_ALIAS_LOOKUP = {};
@@ -369,7 +576,11 @@ function teamsMatch(pickName, eventName) {
 // ========================================
 
 function getBestOdds(event) {
-  const result = { home: null, draw: null, away: null };
+  const result = {
+    home: null,
+    draw: null,
+    away: null
+  };
 
   for (const bookmaker of event.bookmakers || []) {
     for (const market of bookmaker.markets || []) {
@@ -413,8 +624,11 @@ function mapFixture(event, leagueName) {
 }
 
 function getFinalOutcome(event) {
-  if (!event || event.completed !== true ||
-      !Array.isArray(event.scores)) {
+  if (
+    !event ||
+    event.completed !== true ||
+    !Array.isArray(event.scores)
+  ) {
     return null;
   }
 
@@ -433,20 +647,25 @@ function getFinalOutcome(event) {
     }
   }
 
-  if (!Number.isFinite(homeScore) ||
-      !Number.isFinite(awayScore)) {
+  if (
+    !Number.isFinite(homeScore) ||
+    !Number.isFinite(awayScore)
+  ) {
     return null;
   }
 
   if (homeScore > awayScore) return "home";
   if (homeScore < awayScore) return "away";
+
   return "draw";
 }
 
 function normalizeChoice(choice) {
   const value = normalizeText(choice);
 
-  if (["h", "1", "home", "home win", "home team"].includes(value)) {
+  if (
+    ["h", "1", "home", "home win", "home team"].includes(value)
+  ) {
     return "home";
   }
 
@@ -454,7 +673,9 @@ function normalizeChoice(choice) {
     return "draw";
   }
 
-  if (["a", "2", "away", "away win", "away team"].includes(value)) {
+  if (
+    ["a", "2", "away", "away win", "away team"].includes(value)
+  ) {
     return "away";
   }
 
@@ -471,6 +692,7 @@ function getPickKickoff(pick) {
   if (!value) return null;
 
   const timestamp = Date.parse(value);
+
   return Number.isFinite(timestamp) ? timestamp : null;
 }
 
@@ -481,6 +703,7 @@ function findMatchingEvent(pick, events) {
   if (!home || !away) return null;
 
   const pickTime = getPickKickoff(pick);
+
   if (pickTime === null) return null;
 
   const candidates = [];
@@ -492,6 +715,7 @@ function findMatchingEvent(pick, events) {
     if (!teamsMatch(away, event.away_team)) continue;
 
     const eventTime = Date.parse(event.commence_time || "");
+
     if (!Number.isFinite(eventTime)) continue;
 
     const difference = Math.abs(pickTime - eventTime);
@@ -499,13 +723,18 @@ function findMatchingEvent(pick, events) {
     // Require a close kickoff match to avoid scoring the wrong fixture.
     if (difference > 6 * 60 * 60 * 1000) continue;
 
-    candidates.push({ event, difference });
+    candidates.push({
+      event,
+      difference
+    });
   }
 
   candidates.sort((a, b) => a.difference - b.difference);
 
   if (!candidates.length) return null;
 
+  // If two possible matches are too close in confidence,
+  // leave the pick unresolved rather than risk incorrect scoring.
   if (
     candidates.length > 1 &&
     Math.abs(candidates[0].difference - candidates[1].difference)
@@ -541,7 +770,10 @@ app.get("/", (req, res) => {
 });
 
 app.get("/api/health", (req, res) => {
-  res.json({ success: true, status: "online" });
+  res.json({
+    success: true,
+    status: "online"
+  });
 });
 
 app.get("/api/diagnostic", (req, res) => {
@@ -577,8 +809,10 @@ app.get("/api/odds/sports", async (req, res) => {
     });
   } catch (error) {
     sendApiError(
-      res, error.status || 500,
-      "Could not load available sports.", error.message
+      res,
+      error.status || 500,
+      "Could not load available sports.",
+      error.message
     );
   }
 });
@@ -609,7 +843,10 @@ app.get("/api/odds", async (req, res) => {
     });
   } catch (error) {
     sendApiError(
-      res, error.status || 500, "Could not load odds.", error.message
+      res,
+      error.status || 500,
+      "Could not load odds.",
+      error.message
     );
   }
 });
@@ -631,11 +868,13 @@ app.get("/api/fixtures", async (req, res) => {
       }
     );
 
-    let fixtures = (Array.isArray(result.data) ? result.data : [])
-      .map(event => mapFixture(event, event.sport_title));
+    let fixtures = (
+      Array.isArray(result.data) ? result.data : []
+    ).map(event => mapFixture(event, event.sport_title));
 
     if (req.query.date) {
       const date = String(req.query.date).slice(0, 10);
+
       fixtures = fixtures.filter(item =>
         String(item.kickoff || "").startsWith(date)
       );
@@ -662,7 +901,10 @@ app.get("/api/fixtures", async (req, res) => {
     });
   } catch (error) {
     sendApiError(
-      res, error.status || 500, "Could not load fixtures.", error.message
+      res,
+      error.status || 500,
+      "Could not load fixtures.",
+      error.message
     );
   }
 });
@@ -674,9 +916,11 @@ app.get("/api/fixtures", async (req, res) => {
 app.get("/api/scores", async (req, res) => {
   try {
     const sport = req.query.sport || "soccer_epl";
+
     let daysFrom = Number(req.query.daysFrom || 3);
 
     if (!Number.isFinite(daysFrom)) daysFrom = 3;
+
     daysFrom = Math.max(1, Math.min(3, daysFrom));
 
     const result = await oddsRequest(
@@ -693,8 +937,10 @@ app.get("/api/scores", async (req, res) => {
     });
   } catch (error) {
     sendApiError(
-      res, error.status || 500,
-      "Could not load completed scores.", error.message
+      res,
+      error.status || 500,
+      "Could not load completed scores.",
+      error.message
     );
   }
 });
@@ -709,16 +955,26 @@ app.post("/api/score-predictions", async (req, res) => {
 
     if (!secret) {
       return sendApiError(
-        res, 500, "SCORING_SECRET is not configured in Render."
+        res,
+        500,
+        "SCORING_SECRET is not configured in Render."
       );
     }
 
     if (req.get("x-scoring-secret") !== secret) {
-      return sendApiError(res, 401, "Invalid scoring authorization.");
+      return sendApiError(
+        res,
+        401,
+        "Invalid scoring authorization."
+      );
     }
 
     if (!hasSupabaseConfig()) {
-      return sendApiError(res, 500, "Supabase is not configured.");
+      return sendApiError(
+        res,
+        500,
+        "Supabase is not configured."
+      );
     }
 
     const entries = await supabaseRequest(
@@ -733,6 +989,7 @@ app.post("/api/score-predictions", async (req, res) => {
         checked: 0,
         graded: 0,
         pending: 0,
+        skipped: 0,
         pointsAwarded: 0
       });
     }
@@ -758,7 +1015,9 @@ app.post("/api/score-predictions", async (req, res) => {
         message: "No recognized leagues found in pending slips.",
         checked: entries.length,
         graded: 0,
-        pending: entries.length
+        pending: entries.length,
+        skipped: 0,
+        pointsAwarded: 0
       });
     }
 
@@ -790,6 +1049,8 @@ app.post("/api/score-predictions", async (req, res) => {
     let pending = 0;
     let skipped = 0;
     let pointsAwarded = 0;
+
+    // Keep the response small. Do not include per-pick arrays.
     const results = [];
 
     for (const entry of entries) {
@@ -797,18 +1058,19 @@ app.post("/api/score-predictions", async (req, res) => {
 
       if (!picks.length) {
         skipped++;
+
         results.push({
           entryId: entry.id,
           status: "skipped",
           reason: "No picks found."
         });
+
         continue;
       }
 
       let correct = 0;
       let unresolved = 0;
       let invalid = 0;
-      const pickResults = [];
 
       for (const pick of picks) {
         const sportKey = getSportKey(
@@ -823,11 +1085,6 @@ app.post("/api/score-predictions", async (req, res) => {
         if (!sportKey || !choice) {
           invalid++;
           unresolved++;
-          pickResults.push({
-            home: pick.home || pick.home_team || null,
-            away: pick.away || pick.away_team || null,
-            status: "invalid_league_or_selection"
-          });
           continue;
         }
 
@@ -835,11 +1092,6 @@ app.post("/api/score-predictions", async (req, res) => {
 
         if (!events) {
           unresolved++;
-          pickResults.push({
-            home: pick.home || pick.home_team || null,
-            away: pick.away || pick.away_team || null,
-            status: "scores_unavailable"
-          });
           continue;
         }
 
@@ -847,11 +1099,6 @@ app.post("/api/score-predictions", async (req, res) => {
 
         if (!event) {
           unresolved++;
-          pickResults.push({
-            home: pick.home || pick.home_team || null,
-            away: pick.away || pick.away_team || null,
-            status: "no_matching_completed_result"
-          });
           continue;
         }
 
@@ -859,28 +1106,15 @@ app.post("/api/score-predictions", async (req, res) => {
 
         if (!outcome) {
           unresolved++;
-          pickResults.push({
-            home: event.home_team,
-            away: event.away_team,
-            status: "final_score_unavailable"
-          });
           continue;
         }
 
-        const isCorrect = choice === outcome;
-        if (isCorrect) correct++;
-
-        pickResults.push({
-          home: event.home_team,
-          away: event.away_team,
-          outcome,
-          choice,
-          correct: isCorrect,
-          status: "resolved"
-        });
+        if (choice === outcome) {
+          correct++;
+        }
       }
 
-      // Keep the entire slip pending until every pick is resolved.
+      // Never grade a slip while any pick is unresolved.
       if (unresolved > 0) {
         pending++;
 
@@ -891,7 +1125,6 @@ app.post("/api/score-predictions", async (req, res) => {
           totalPicks: picks.length,
           unresolved,
           invalidSelections: invalid,
-          pickResults,
           reason: "Some matches have no reliably matched final result yet."
         });
 
@@ -922,8 +1155,7 @@ app.post("/api/score-predictions", async (req, res) => {
           status: "graded",
           correct,
           totalPicks: picks.length,
-          points,
-          pickResults
+          points
         });
       } else {
         results.push({
@@ -934,6 +1166,7 @@ app.post("/api/score-predictions", async (req, res) => {
       }
     }
 
+    // Compact response for cron-job.org.
     res.json({
       success: true,
       message: "Prediction scoring check completed.",
@@ -943,7 +1176,10 @@ app.post("/api/score-predictions", async (req, res) => {
       skipped,
       pointsAwarded,
       sportsChecked: Array.from(requiredSports),
-      sportErrors,
+      sportErrors: sportErrors.map(item => ({
+        sport: item.sport,
+        error: item.error
+      })),
       results
     });
   } catch (error) {
@@ -987,13 +1223,17 @@ app.get("/api/leaderboard", async (req, res) => {
 
       current.points += Number(entry.point || 0);
       current.gradedSlips += 1;
+
       totals.set(entry.user_id, current);
     }
 
     const usernames = new Map();
 
     for (const profile of profiles || []) {
-      usernames.set(profile.user_id, profile.username || "Player");
+      usernames.set(
+        profile.user_id,
+        profile.username || "Player"
+      );
     }
 
     const leaderboard = Array.from(totals.values())
