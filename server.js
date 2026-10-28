@@ -13,16 +13,9 @@ app.use((req, res, next) => {
   );
   res.header("Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS");
 
-  if (req.method === "OPTIONS") {
-    return res.sendStatus(204);
-  }
-
+  if (req.method === "OPTIONS") return res.sendStatus(204);
   next();
 });
-
-// ========================================
-// FOOTBALL LEAGUES
-// ========================================
 
 const FOOTBALL_LEAGUES = [
   { key: "soccer_epl", name: "Premier League" },
@@ -47,33 +40,17 @@ const FOOTBALL_LEAGUES = [
 // ENVIRONMENT VARIABLES
 // ========================================
 
-function getApiKey() {
-  return process.env.ODDS_API_KEY || "";
-}
+const getApiKey = () => process.env.ODDS_API_KEY || "";
+const getSupabaseUrl = () =>
+  (process.env.SUPABASE_URL || "").replace(/\/+$/, "");
+const getSupabaseKey = () =>
+  process.env.SUPABASE_SERVICE_ROLE_KEY || "";
+const getScoringSecret = () => process.env.SCORING_SECRET || "";
 
-function getSupabaseUrl() {
-  return (process.env.SUPABASE_URL || "").replace(/\/+$/, "");
-}
+const hasSupabaseConfig = () =>
+  Boolean(getSupabaseUrl() && getSupabaseKey());
 
-function getSupabaseKey() {
-  return process.env.SUPABASE_SERVICE_ROLE_KEY || "";
-}
-
-function getScoringSecret() {
-  return process.env.SCORING_SECRET || "";
-}
-
-function hasSupabaseConfig() {
-  return Boolean(getSupabaseUrl() && getSupabaseKey());
-}
-
-// ========================================
-// GENERAL HELPERS
-// ========================================
-
-function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 function normalizeText(value) {
   return String(value || "")
@@ -87,20 +64,13 @@ function normalizeText(value) {
 }
 
 function sendApiError(res, status, message, details) {
-  const response = {
-    success: false,
-    error: message
-  };
-
-  if (details) {
-    response.details = details;
-  }
-
-  return res.status(status).json(response);
+  const result = { success: false, error: message };
+  if (details) result.details = details;
+  return res.status(status).json(result);
 }
 
 // ========================================
-// THE ODDS API REQUEST
+// THE ODDS API
 // ========================================
 
 async function oddsRequest(path, params = {}) {
@@ -112,10 +82,7 @@ async function oddsRequest(path, params = {}) {
     throw error;
   }
 
-  const url = new URL(
-    `https://api.the-odds-api.com/v4${path}`
-  );
-
+  const url = new URL(`https://api.the-odds-api.com/v4${path}`);
   url.searchParams.set("apiKey", apiKey);
 
   for (const [key, value] of Object.entries(params)) {
@@ -125,13 +92,10 @@ async function oddsRequest(path, params = {}) {
   }
 
   const response = await fetch(url.toString(), {
-    headers: {
-      Accept: "application/json"
-    }
+    headers: { Accept: "application/json" }
   });
 
   const text = await response.text();
-
   let data;
 
   try {
@@ -146,24 +110,19 @@ async function oddsRequest(path, params = {}) {
         ? data.message
         : `The Odds API returned HTTP ${response.status}.`
     );
-
     error.status = response.status;
     throw error;
   }
 
   return {
     data,
-    requestsRemaining: response.headers.get(
-      "x-requests-remaining"
-    ),
-    requestsUsed: response.headers.get(
-      "x-requests-used"
-    )
+    requestsRemaining: response.headers.get("x-requests-remaining"),
+    requestsUsed: response.headers.get("x-requests-used")
   };
 }
 
 // ========================================
-// SUPABASE REST REQUEST
+// SUPABASE REST
 // ========================================
 
 async function supabaseRequest(table, query = "", options = {}) {
@@ -171,30 +130,25 @@ async function supabaseRequest(table, query = "", options = {}) {
     const error = new Error(
       "Supabase environment variables are not configured."
     );
-
     error.status = 500;
     throw error;
   }
 
-  const baseUrl = getSupabaseUrl();
-  const serviceKey = getSupabaseKey();
-
   const url = new URL(
-    `${baseUrl}/rest/v1/${table}`
+    `${getSupabaseUrl()}/rest/v1/${table}`
   );
 
   if (query) {
-    const queryString = query.startsWith("?")
-      ? query.slice(1)
-      : query;
+    const params = new URLSearchParams(
+      query.startsWith("?") ? query.slice(1) : query
+    );
 
-    const searchParams = new URLSearchParams(queryString);
-
-    for (const [key, value] of searchParams.entries()) {
+    for (const [key, value] of params.entries()) {
       url.searchParams.append(key, value);
     }
   }
 
+  const serviceKey = getSupabaseKey();
   const headers = {
     apikey: serviceKey,
     Authorization: `Bearer ${serviceKey}`,
@@ -205,21 +159,17 @@ async function supabaseRequest(table, query = "", options = {}) {
     headers["Content-Type"] = "application/json";
   }
 
-  if (options.prefer) {
-    headers.Prefer = options.prefer;
-  }
+  if (options.prefer) headers.Prefer = options.prefer;
 
   const response = await fetch(url.toString(), {
     method: options.method || "GET",
     headers,
-    body:
-      options.body !== undefined
-        ? JSON.stringify(options.body)
-        : undefined
+    body: options.body !== undefined
+      ? JSON.stringify(options.body)
+      : undefined
   });
 
   const text = await response.text();
-
   let data = null;
 
   try {
@@ -234,10 +184,8 @@ async function supabaseRequest(table, query = "", options = {}) {
         ? data.message
         : `Supabase returned HTTP ${response.status}.`
     );
-
     error.status = response.status;
     error.details = data;
-
     throw error;
   }
 
@@ -245,7 +193,7 @@ async function supabaseRequest(table, query = "", options = {}) {
 }
 
 // ========================================
-// LEAGUE NAME TO ODDS API SPORT KEY
+// LEAGUE MAPPING
 // ========================================
 
 function getSportKey(league, explicitSportKey) {
@@ -258,215 +206,123 @@ function getSportKey(league, explicitSportKey) {
 
   const name = normalizeText(league);
 
-  const aliases = [
-    {
-      key: "soccer_epl",
-      names: [
-        "premier league",
-        "english premier league",
-        "epl"
-      ]
-    },
-    {
-      key: "soccer_england_efl_champ",
-      names: [
-        "championship",
-        "english championship",
-        "efl championship"
-      ]
-    },
-    {
-      key: "soccer_spain_la_liga",
-      names: [
-        "la liga",
-        "laliga",
-        "spanish la liga"
-      ]
-    },
-    {
-      key: "soccer_germany_bundesliga",
-      names: [
-        "bundesliga",
-        "german bundesliga"
-      ]
-    },
-    {
-      key: "soccer_italy_serie_a",
-      names: [
-        "serie a",
-        "italian serie a",
-        "italy serie a"
-      ]
-    },
-    {
-      key: "soccer_france_ligue_one",
-      names: [
-        "ligue 1",
-        "ligue one",
-        "french ligue 1"
-      ]
-    },
-    {
-      key: "soccer_portugal_primeira_liga",
-      names: [
-        "primeira liga",
-        "portugal first league",
-        "portuguese primeira liga",
-        "liga portugal"
-      ]
-    },
-    {
-      key: "soccer_netherlands_eredivisie",
-      names: [
-        "eredivisie",
-        "netherlands first league",
-        "dutch eredivisie"
-      ]
-    },
-    {
-      key: "soccer_brazil_campeonato",
-      names: [
-        "brazil serie a",
-        "brazilian serie a",
-        "brasileirao",
-        "campeonato brasileiro serie a",
-        "campeonato brasileiro serie a",
-        "brasileirao serie a"
-      ]
-    },
-    {
-      key: "soccer_uefa_champs_league",
-      names: [
-        "champions league",
-        "uefa champions league",
-        "ucl"
-      ]
-    },
-    {
-      key: "soccer_uefa_europa_league",
-      names: [
-        "europa league",
-        "uefa europa league"
-      ]
-    },
-    {
-      key: "soccer_uefa_european_championship",
-      names: [
-        "european championship",
-        "euro",
-        "uefa euro"
-      ]
-    },
-    {
-      key: "soccer_fifa_world_cup",
-      names: [
-        "world cup",
-        "fifa world cup"
-      ]
-    }
-  ];
+  const groups = {
+    soccer_epl: [
+      "premier league", "english premier league", "epl"
+    ],
+    soccer_england_efl_champ: [
+      "championship", "english championship", "efl championship"
+    ],
+    soccer_spain_la_liga: [
+      "la liga", "laliga", "spanish la liga"
+    ],
+    soccer_germany_bundesliga: [
+      "bundesliga", "german bundesliga"
+    ],
+    soccer_italy_serie_a: [
+      "serie a", "italian serie a", "italy serie a"
+    ],
+    soccer_france_ligue_one: [
+      "ligue 1", "ligue one", "french ligue 1"
+    ],
+    soccer_portugal_primeira_liga: [
+      "primeira liga", "portugal first league",
+      "portuguese primeira liga", "liga portugal"
+    ],
+    soccer_netherlands_eredivisie: [
+      "eredivisie", "netherlands first league", "dutch eredivisie"
+    ],
+    soccer_brazil_campeonato: [
+      "brazil serie a", "brazilian serie a", "brasileirao",
+      "campeonato brasileiro serie a", "brasileirao serie a"
+    ],
+    soccer_uefa_champs_league: [
+      "champions league", "uefa champions league", "ucl"
+    ],
+    soccer_uefa_europa_league: [
+      "europa league", "uefa europa league"
+    ],
+    soccer_uefa_european_championship: [
+      "european championship", "euro", "uefa euro"
+    ],
+    soccer_fifa_world_cup: [
+      "world cup", "fifa world cup"
+    ]
+  };
 
-  for (const group of aliases) {
-    if (group.names.some(alias => normalizeText(alias) === name)) {
-      return group.key;
+  for (const [key, names] of Object.entries(groups)) {
+    if (names.some(item => normalizeText(item) === name)) {
+      return key;
     }
   }
 
-  // Unknown league: don't guess.
   return null;
 }
 
 // ========================================
-// TEAM NAME NORMALIZATION
+// IMPROVED TEAM-NAME MATCHING
 // ========================================
 
 const TEAM_ALIASES = {
   "atletico mineiro": [
-    "ca mineiro",
-    "atletico mineiro",
-    "atletico mg",
+    "ca mineiro", "atletico mineiro", "atletico mg",
     "atletico mineiro mg"
   ],
-
   "red bull bragantino": [
-    "rb bragantino",
-    "bragantino",
-    "bragantino sp",
-    "red bull bragantino"
+    "rb bragantino", "bragantino", "bragantino sp",
+    "red bull bragantino", "bragantino sp"
   ],
-
   "athletico paranaense": [
-    "athletico pr",
-    "atletico paranaense",
+    "athletico pr", "atletico paranaense",
     "athletico paranaense"
   ],
-
-  "gremio": [
-    "gremio",
-    "gremio fbpa"
-  ],
-
+  "gremio": ["gremio", "gremio fbpa"],
   "internacional": [
-    "internacional",
-    "sc internacional",
-    "internacional rs"
+    "internacional", "sc internacional", "internacional rs"
   ],
-
-  "palmeiras": [
-    "palmeiras",
-    "se palmeiras"
+  "palmeiras": ["palmeiras", "se palmeiras"],
+  "flamengo": ["flamengo", "cr flamengo"],
+  "corinthians": ["corinthians", "sc corinthians"],
+  "sao paulo": ["sao paulo", "sao paulo fc"],
+  "vasco da gama": ["vasco da gama", "cr vasco da gama", "vasco"],
+  "cruzeiro": ["cruzeiro", "cruzeiro ec"],
+  "botafogo": ["botafogo", "botafogo fr"],
+  "santos": ["santos", "santos fc"],
+  "bahia": ["bahia", "ec bahia"],
+  "fortaleza": ["fortaleza", "fortaleza ec"],
+  "fluminense": ["fluminense", "fluminense fc"],
+  "bologna": ["bologna", "bologna fc 1909"],
+  "inter milan": [
+    "inter milan", "fc internazionale milano",
+    "internazionale milano", "internazionale", "inter"
   ],
-
-  "flamengo": [
-    "flamengo",
-    "cr flamengo"
+  "ac milan": ["ac milan", "milan"],
+  "genoa": ["genoa", "genoa cfc"],
+  "udinese": ["udinese", "udinese calcio"],
+  "parma": ["parma", "parma calcio 1913"],
+  "napoli": ["napoli", "ssc napoli"],
+  "monza": ["monza", "ac monza"],
+  "juventus": ["juventus", "juventus fc"],
+  "fiorentina": [
+    "fiorentina", "ac fiorentina", "acf fiorentina"
   ],
-
-  "corinthians": [
-    "corinthians",
-    "sc corinthians"
+  "venezia": ["venezia", "venezia fc"],
+  "atalanta": ["atalanta", "atalanta bc"],
+  "roma": ["roma", "as roma"],
+  "cagliari": ["cagliari", "cagliari calcio"],
+  "lazio": ["lazio", "ss lazio"],
+  "sassuolo": ["sassuolo", "us sassuolo"],
+  "lecce": ["lecce", "us lecce"],
+  "frosinone": ["frosinone", "frosinone calcio"],
+  "lille": ["lille", "lille osc"],
+  "lens": ["lens", "racing club de lens"],
+  "sporting cp": [
+    "sporting cp", "sporting clube de portugal",
+    "sporting portugal"
   ],
-
-  "sao paulo": [
-    "sao paulo",
-    "sao paulo fc"
-  ],
-
-  "vasco da gama": [
-    "vasco da gama",
-    "cr vasco da gama",
-    "vasco"
-  ],
-
-  "cruzeiro": [
-    "cruzeiro",
-    "cruzeiro ec"
-  ],
-
-  "botafogo": [
-    "botafogo",
-    "botafogo fr"
-  ],
-
-  "santos": [
-    "santos",
-    "santos fc"
-  ],
-
-  "bahia": [
-    "bahia",
-    "ec bahia"
-  ],
-
-  "fortaleza": [
-    "fortaleza",
-    "fortaleza ec"
-  ],
-
-  "fluminense": [
-    "fluminense",
-    "fluminense fc"
-  ]
+  "casa pia": ["casa pia", "casa pia ac"],
+  "chapecoense": ["chapecoense", "chapecoense af"],
+  "remo": ["remo", "clube do remo"]
 };
 
 const TEAM_ALIAS_LOOKUP = {};
@@ -480,63 +336,42 @@ for (const [canonical, names] of Object.entries(TEAM_ALIASES)) {
 }
 
 function canonicalTeamName(name) {
-  const normalized = normalizeText(name);
+  let normalized = normalizeText(name);
 
   if (TEAM_ALIAS_LOOKUP[normalized]) {
     return TEAM_ALIAS_LOOKUP[normalized];
   }
 
-  // Remove common club prefixes and suffixes.
-  return normalized
+  normalized = normalized
     .replace(
-      /^(fc|cf|sc|ac|as|cd|rc|rcd|real|club|sporting|ca|cr|ec|se)\s+/,
+      /^(fc|cf|sc|ac|as|cd|rc|rcd|real|club|sporting|ca|cr|ec|se|us|ss|afc)\s+/,
       ""
     )
     .replace(
-      /\s+(fc|cf|sc|ac|as|cd|sa|afc|club|football club|ec|mg|sp|rs|pr)$/,
+      /\s+(fc|cf|sc|ac|as|cd|sa|afc|club|ec|mg|sp|rs|pr|bc|cfc|calcio)$/,
       ""
     )
+    .replace(/\s+1909$/, "")
     .trim();
+
+  return TEAM_ALIAS_LOOKUP[normalized] || normalized;
 }
 
 function teamsMatch(pickName, eventName) {
   const a = canonicalTeamName(pickName);
   const b = canonicalTeamName(eventName);
 
-  if (!a || !b) {
-    return false;
-  }
-
-  if (a === b) {
-    return true;
-  }
-
-  // Allow a strong whole-name containment match only.
-  // This helps with provider naming differences without
-  // matching teams merely because they share one word.
-  if (a.length >= 8 && b.length >= 8) {
-    if (a.startsWith(b + " ") || b.startsWith(a + " ")) {
-      return true;
-    }
-  }
-
-  return false;
+  return Boolean(a && b && a === b);
 }
 
 // ========================================
-// FIXTURE AND ODDS HELPERS
+// FIXTURE HELPERS
 // ========================================
 
 function getBestOdds(event) {
-  const markets = event.bookmakers || [];
+  const result = { home: null, draw: null, away: null };
 
-  const result = {
-    home: null,
-    draw: null,
-    away: null
-  };
-
-  for (const bookmaker of markets) {
+  for (const bookmaker of event.bookmakers || []) {
     for (const market of bookmaker.markets || []) {
       if (market.key !== "h2h") continue;
 
@@ -545,9 +380,7 @@ function getBestOdds(event) {
           result.home = outcome.price;
         } else if (outcome.name === event.away_team) {
           result.away = outcome.price;
-        } else if (
-          normalizeText(outcome.name) === "draw"
-        ) {
+        } else if (normalizeText(outcome.name) === "draw") {
           result.draw = outcome.price;
         }
       }
@@ -580,11 +413,8 @@ function mapFixture(event, leagueName) {
 }
 
 function getFinalOutcome(event) {
-  if (!event || event.completed !== true) {
-    return null;
-  }
-
-  if (!Array.isArray(event.scores)) {
+  if (!event || event.completed !== true ||
+      !Array.isArray(event.scores)) {
     return null;
   }
 
@@ -594,55 +424,42 @@ function getFinalOutcome(event) {
   for (const score of event.scores) {
     if (!score || score.score === undefined) continue;
 
-    if (score.name === event.home_team) {
+    if (teamsMatch(event.home_team, score.name)) {
       homeScore = Number(score.score);
     }
 
-    if (score.name === event.away_team) {
+    if (teamsMatch(event.away_team, score.name)) {
       awayScore = Number(score.score);
     }
   }
 
-  if (
-    !Number.isFinite(homeScore) ||
-    !Number.isFinite(awayScore)
-  ) {
+  if (!Number.isFinite(homeScore) ||
+      !Number.isFinite(awayScore)) {
     return null;
   }
 
   if (homeScore > awayScore) return "home";
   if (homeScore < awayScore) return "away";
-
   return "draw";
 }
 
 function normalizeChoice(choice) {
   const value = normalizeText(choice);
 
-  if (
-    ["h", "1", "home", "home win", "home team"].includes(value)
-  ) {
+  if (["h", "1", "home", "home win", "home team"].includes(value)) {
     return "home";
   }
 
-  if (
-    ["d", "x", "draw", "tie"].includes(value)
-  ) {
+  if (["d", "x", "draw", "tie"].includes(value)) {
     return "draw";
   }
 
-  if (
-    ["a", "2", "away", "away win", "away team"].includes(value)
-  ) {
+  if (["a", "2", "away", "away win", "away team"].includes(value)) {
     return "away";
   }
 
   return null;
 }
-
-// ========================================
-// MATCH A PICK TO AN ODDS API EVENT
-// ========================================
 
 function getPickKickoff(pick) {
   const value =
@@ -654,13 +471,6 @@ function getPickKickoff(pick) {
   if (!value) return null;
 
   const timestamp = Date.parse(value);
-
-  return Number.isFinite(timestamp) ? timestamp : null;
-}
-
-function getEventKickoff(event) {
-  const timestamp = Date.parse(event.commence_time || "");
-
   return Number.isFinite(timestamp) ? timestamp : null;
 }
 
@@ -668,56 +478,38 @@ function findMatchingEvent(pick, events) {
   const home = pick.home || pick.home_team;
   const away = pick.away || pick.away_team;
 
-  if (!home || !away) {
-    return null;
-  }
+  if (!home || !away) return null;
 
   const pickTime = getPickKickoff(pick);
+  if (pickTime === null) return null;
 
   const candidates = [];
 
   for (const event of events) {
-    if (!event.completed) continue;
+    if (event.completed !== true) continue;
 
-    const sameHome = teamsMatch(home, event.home_team);
-    const sameAway = teamsMatch(away, event.away_team);
+    if (!teamsMatch(home, event.home_team)) continue;
+    if (!teamsMatch(away, event.away_team)) continue;
 
-    // Do not reverse home and away.
-    if (!sameHome || !sameAway) continue;
-
-    const eventTime = getEventKickoff(event);
-
-    // Without a kickoff time, don't risk grading the wrong match.
-    if (pickTime === null || eventTime === null) {
-      continue;
-    }
+    const eventTime = Date.parse(event.commence_time || "");
+    if (!Number.isFinite(eventTime)) continue;
 
     const difference = Math.abs(pickTime - eventTime);
 
-    // Allow up to six hours of provider kickoff-time difference.
-    if (difference > 6 * 60 * 60 * 1000) {
-      continue;
-    }
+    // Require a close kickoff match to avoid scoring the wrong fixture.
+    if (difference > 6 * 60 * 60 * 1000) continue;
 
-    candidates.push({
-      event,
-      difference
-    });
+    candidates.push({ event, difference });
   }
 
   candidates.sort((a, b) => a.difference - b.difference);
 
-  if (candidates.length === 0) {
-    return null;
-  }
+  if (!candidates.length) return null;
 
-  // If two candidates are almost equally close, avoid
-  // grading until the match can be identified more reliably.
   if (
     candidates.length > 1 &&
-    Math.abs(
-      candidates[0].difference - candidates[1].difference
-    ) < 60 * 60 * 1000
+    Math.abs(candidates[0].difference - candidates[1].difference)
+      < 60 * 60 * 1000
   ) {
     return null;
   }
@@ -749,10 +541,7 @@ app.get("/", (req, res) => {
 });
 
 app.get("/api/health", (req, res) => {
-  res.json({
-    success: true,
-    status: "online"
-  });
+  res.json({ success: true, status: "online" });
 });
 
 app.get("/api/diagnostic", (req, res) => {
@@ -774,7 +563,7 @@ app.get("/api/competitions", (req, res) => {
 });
 
 // ========================================
-// AVAILABLE SPORTS FROM THE ODDS API
+// AVAILABLE SPORTS
 // ========================================
 
 app.get("/api/odds/sports", async (req, res) => {
@@ -788,16 +577,14 @@ app.get("/api/odds/sports", async (req, res) => {
     });
   } catch (error) {
     sendApiError(
-      res,
-      error.status || 500,
-      "Could not load available sports.",
-      error.message
+      res, error.status || 500,
+      "Could not load available sports.", error.message
     );
   }
 });
 
 // ========================================
-// ODDS ROUTE
+// ODDS
 // ========================================
 
 app.get("/api/odds", async (req, res) => {
@@ -816,24 +603,19 @@ app.get("/api/odds", async (req, res) => {
     res.json({
       success: true,
       sport,
-      count: Array.isArray(result.data)
-        ? result.data.length
-        : 0,
+      count: Array.isArray(result.data) ? result.data.length : 0,
       requestsRemaining: result.requestsRemaining,
       response: result.data
     });
   } catch (error) {
     sendApiError(
-      res,
-      error.status || 500,
-      "Could not load odds.",
-      error.message
+      res, error.status || 500, "Could not load odds.", error.message
     );
   }
 });
 
 // ========================================
-// FIXTURES ROUTE
+// FIXTURES
 // ========================================
 
 app.get("/api/fixtures", async (req, res) => {
@@ -849,29 +631,24 @@ app.get("/api/fixtures", async (req, res) => {
       }
     );
 
-    const fixtures = (Array.isArray(result.data)
-      ? result.data
-      : []
-    ).map(event => mapFixture(event, event.sport_title));
-
-    let filtered = fixtures;
+    let fixtures = (Array.isArray(result.data) ? result.data : [])
+      .map(event => mapFixture(event, event.sport_title));
 
     if (req.query.date) {
-      const targetDate = String(req.query.date).slice(0, 10);
-
-      filtered = filtered.filter(item =>
-        String(item.kickoff || "").startsWith(targetDate)
+      const date = String(req.query.date).slice(0, 10);
+      fixtures = fixtures.filter(item =>
+        String(item.kickoff || "").startsWith(date)
       );
     }
 
     if (req.query.from) {
-      filtered = filtered.filter(item =>
+      fixtures = fixtures.filter(item =>
         String(item.kickoff || "").slice(0, 10) >= req.query.from
       );
     }
 
     if (req.query.to) {
-      filtered = filtered.filter(item =>
+      fixtures = fixtures.filter(item =>
         String(item.kickoff || "").slice(0, 10) <= req.query.to
       );
     }
@@ -879,58 +656,45 @@ app.get("/api/fixtures", async (req, res) => {
     res.json({
       success: true,
       sport,
-      count: filtered.length,
+      count: fixtures.length,
       requestsRemaining: result.requestsRemaining,
-      response: filtered
+      response: fixtures
     });
   } catch (error) {
     sendApiError(
-      res,
-      error.status || 500,
-      "Could not load fixtures.",
-      error.message
+      res, error.status || 500, "Could not load fixtures.", error.message
     );
   }
 });
 
 // ========================================
-// COMPLETED SCORES ROUTE
+// SCORES
 // ========================================
 
 app.get("/api/scores", async (req, res) => {
   try {
     const sport = req.query.sport || "soccer_epl";
-
     let daysFrom = Number(req.query.daysFrom || 3);
 
-    if (!Number.isFinite(daysFrom)) {
-      daysFrom = 3;
-    }
-
+    if (!Number.isFinite(daysFrom)) daysFrom = 3;
     daysFrom = Math.max(1, Math.min(3, daysFrom));
 
     const result = await oddsRequest(
       `/sports/${encodeURIComponent(sport)}/scores/`,
-      {
-        daysFrom
-      }
+      { daysFrom }
     );
 
     res.json({
       success: true,
       sport,
-      count: Array.isArray(result.data)
-        ? result.data.length
-        : 0,
+      count: Array.isArray(result.data) ? result.data.length : 0,
       requestsRemaining: result.requestsRemaining,
       response: result.data
     });
   } catch (error) {
     sendApiError(
-      res,
-      error.status || 500,
-      "Could not load completed scores.",
-      error.message
+      res, error.status || 500,
+      "Could not load completed scores.", error.message
     );
   }
 });
@@ -945,29 +709,18 @@ app.post("/api/score-predictions", async (req, res) => {
 
     if (!secret) {
       return sendApiError(
-        res,
-        500,
-        "SCORING_SECRET is not configured in Render."
+        res, 500, "SCORING_SECRET is not configured in Render."
       );
     }
 
     if (req.get("x-scoring-secret") !== secret) {
-      return sendApiError(
-        res,
-        401,
-        "Invalid scoring authorization."
-      );
+      return sendApiError(res, 401, "Invalid scoring authorization.");
     }
 
     if (!hasSupabaseConfig()) {
-      return sendApiError(
-        res,
-        500,
-        "Supabase is not configured."
-      );
+      return sendApiError(res, 500, "Supabase is not configured.");
     }
 
-    // Only fetch slips that have not already been graded.
     const entries = await supabaseRequest(
       "prediction_entries",
       "select=id,user_id,picks,point,status&status=eq.pending&limit=500"
@@ -978,17 +731,16 @@ app.post("/api/score-predictions", async (req, res) => {
         success: true,
         message: "No pending prediction slips.",
         checked: 0,
-        graded: 0
+        graded: 0,
+        pending: 0,
+        pointsAwarded: 0
       });
     }
 
-    // Identify which sports are needed for pending slips.
     const requiredSports = new Set();
 
     for (const entry of entries) {
-      const picks = Array.isArray(entry.picks)
-        ? entry.picks
-        : [];
+      const picks = Array.isArray(entry.picks) ? entry.picks : [];
 
       for (const pick of picks) {
         const sportKey = getSportKey(
@@ -996,26 +748,20 @@ app.post("/api/score-predictions", async (req, res) => {
           pick.sport_key || pick.sport
         );
 
-        if (sportKey) {
-          requiredSports.add(sportKey);
-        }
+        if (sportKey) requiredSports.add(sportKey);
       }
     }
 
-    // If no league could be identified, do not fetch all
-    // competitions blindly or grade using uncertain data.
     if (requiredSports.size === 0) {
       return res.json({
         success: true,
-        message:
-          "No recognized leagues found in pending slips. Check the league names stored in picks.",
+        message: "No recognized leagues found in pending slips.",
         checked: entries.length,
         graded: 0,
         pending: entries.length
       });
     }
 
-    // Fetch scores once per required sport.
     const eventsBySport = new Map();
     const sportErrors = [];
 
@@ -1023,9 +769,7 @@ app.post("/api/score-predictions", async (req, res) => {
       try {
         const result = await oddsRequest(
           `/sports/${encodeURIComponent(sportKey)}/scores/`,
-          {
-            daysFrom: 3
-          }
+          { daysFrom: 3 }
         );
 
         eventsBySport.set(
@@ -1039,7 +783,6 @@ app.post("/api/score-predictions", async (req, res) => {
         });
       }
 
-      // Small delay between requests.
       await sleep(150);
     }
 
@@ -1047,29 +790,25 @@ app.post("/api/score-predictions", async (req, res) => {
     let pending = 0;
     let skipped = 0;
     let pointsAwarded = 0;
-
     const results = [];
 
     for (const entry of entries) {
-      const picks = Array.isArray(entry.picks)
-        ? entry.picks
-        : [];
+      const picks = Array.isArray(entry.picks) ? entry.picks : [];
 
-      if (picks.length === 0) {
+      if (!picks.length) {
         skipped++;
-
         results.push({
           entryId: entry.id,
           status: "skipped",
           reason: "No picks found."
         });
-
         continue;
       }
 
       let correct = 0;
       let unresolved = 0;
       let invalid = 0;
+      const pickResults = [];
 
       for (const pick of picks) {
         const sportKey = getSportKey(
@@ -1084,6 +823,11 @@ app.post("/api/score-predictions", async (req, res) => {
         if (!sportKey || !choice) {
           invalid++;
           unresolved++;
+          pickResults.push({
+            home: pick.home || pick.home_team || null,
+            away: pick.away || pick.away_team || null,
+            status: "invalid_league_or_selection"
+          });
           continue;
         }
 
@@ -1091,6 +835,11 @@ app.post("/api/score-predictions", async (req, res) => {
 
         if (!events) {
           unresolved++;
+          pickResults.push({
+            home: pick.home || pick.home_team || null,
+            away: pick.away || pick.away_team || null,
+            status: "scores_unavailable"
+          });
           continue;
         }
 
@@ -1098,6 +847,11 @@ app.post("/api/score-predictions", async (req, res) => {
 
         if (!event) {
           unresolved++;
+          pickResults.push({
+            home: pick.home || pick.home_team || null,
+            away: pick.away || pick.away_team || null,
+            status: "no_matching_completed_result"
+          });
           continue;
         }
 
@@ -1105,16 +859,28 @@ app.post("/api/score-predictions", async (req, res) => {
 
         if (!outcome) {
           unresolved++;
+          pickResults.push({
+            home: event.home_team,
+            away: event.away_team,
+            status: "final_score_unavailable"
+          });
           continue;
         }
 
-        if (choice === outcome) {
-          correct++;
-        }
+        const isCorrect = choice === outcome;
+        if (isCorrect) correct++;
+
+        pickResults.push({
+          home: event.home_team,
+          away: event.away_team,
+          outcome,
+          choice,
+          correct: isCorrect,
+          status: "resolved"
+        });
       }
 
-      // Never grade a slip while one or more selections
-      // have no reliably matched final result.
+      // Keep the entire slip pending until every pick is resolved.
       if (unresolved > 0) {
         pending++;
 
@@ -1125,18 +891,15 @@ app.post("/api/score-predictions", async (req, res) => {
           totalPicks: picks.length,
           unresolved,
           invalidSelections: invalid,
-          reason:
-            "Some matches have no reliably matched final result yet."
+          pickResults,
+          reason: "Some matches have no reliably matched final result yet."
         });
 
         continue;
       }
 
-      // Three points for each correct selection.
       const points = correct * 3;
 
-      // Update only if this entry is still pending.
-      // This helps prevent repeated scoring.
       const updated = await supabaseRequest(
         "prediction_entries",
         `id=eq.${encodeURIComponent(entry.id)}&status=eq.pending`,
@@ -1159,14 +922,14 @@ app.post("/api/score-predictions", async (req, res) => {
           status: "graded",
           correct,
           totalPicks: picks.length,
-          points
+          points,
+          pickResults
         });
       } else {
         results.push({
           entryId: entry.id,
           status: "not_updated",
-          reason:
-            "The slip was not updated because it may no longer be pending."
+          reason: "The slip may no longer be pending."
         });
       }
     }
@@ -1224,17 +987,13 @@ app.get("/api/leaderboard", async (req, res) => {
 
       current.points += Number(entry.point || 0);
       current.gradedSlips += 1;
-
       totals.set(entry.user_id, current);
     }
 
     const usernames = new Map();
 
     for (const profile of profiles || []) {
-      usernames.set(
-        profile.user_id,
-        profile.username || "Player"
-      );
+      usernames.set(profile.user_id, profile.username || "Player");
     }
 
     const leaderboard = Array.from(totals.values())
