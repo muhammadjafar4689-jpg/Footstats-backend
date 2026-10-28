@@ -3,18 +3,15 @@ const express = require("express");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-const ODDS_API_BASE = "https://api.the-odds-api.com/v4";
-
 app.use(express.json({ limit: "1mb" }));
 
-// CORS
 app.use((req, res, next) => {
   res.header("Access-Control-Allow-Origin", "*");
-  res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
   res.header(
     "Access-Control-Allow-Headers",
     "Content-Type, Authorization, x-scoring-secret"
   );
+  res.header("Access-Control-Allow-Methods", "GET, POST, PATCH, OPTIONS");
 
   if (req.method === "OPTIONS") {
     return res.sendStatus(204);
@@ -23,7 +20,10 @@ app.use((req, res, next) => {
   next();
 });
 
-// Existing competitions
+// ========================================
+// FOOTBALL LEAGUES
+// ========================================
+
 const FOOTBALL_LEAGUES = [
   { key: "soccer_epl", name: "Premier League" },
   { key: "soccer_england_efl_champ", name: "Championship" },
@@ -36,13 +36,19 @@ const FOOTBALL_LEAGUES = [
   { key: "soccer_brazil_campeonato", name: "Brazil Serie A" },
   { key: "soccer_uefa_champs_league", name: "Champions League" },
   { key: "soccer_uefa_europa_league", name: "Europa League" },
-  { key: "soccer_uefa_european_championship", name: "European Championship" },
+  {
+    key: "soccer_uefa_european_championship",
+    name: "European Championship"
+  },
   { key: "soccer_fifa_world_cup", name: "World Cup" }
 ];
 
-// Environment configuration
+// ========================================
+// ENVIRONMENT VARIABLES
+// ========================================
+
 function getApiKey() {
-  return process.env.ODDS_API_KEY;
+  return process.env.ODDS_API_KEY || "";
 }
 
 function getSupabaseUrl() {
@@ -50,30 +56,67 @@ function getSupabaseUrl() {
 }
 
 function getSupabaseKey() {
-  return process.env.SUPABASE_SERVICE_ROLE_KEY;
+  return process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 }
 
-function checkConfiguration() {
-  if (!getApiKey()) {
-    throw new Error("ODDS_API_KEY is not configured.");
+function getScoringSecret() {
+  return process.env.SCORING_SECRET || "";
+}
+
+function hasSupabaseConfig() {
+  return Boolean(getSupabaseUrl() && getSupabaseKey());
+}
+
+// ========================================
+// GENERAL HELPERS
+// ========================================
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function normalizeText(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+function sendApiError(res, status, message, details) {
+  const response = {
+    success: false,
+    error: message
+  };
+
+  if (details) {
+    response.details = details;
   }
+
+  return res.status(status).json(response);
 }
 
-function checkSupabaseConfiguration() {
-  if (!getSupabaseUrl() || !getSupabaseKey()) {
-    throw new Error(
-      "SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY is missing in Render."
-    );
-  }
-}
+// ========================================
+// THE ODDS API REQUEST
+// ========================================
 
-// The Odds API request
 async function oddsRequest(path, params = {}) {
-  checkConfiguration();
+  const apiKey = getApiKey();
 
-  const url = new URL(ODDS_API_BASE + path);
+  if (!apiKey) {
+    const error = new Error("ODDS_API_KEY is not configured.");
+    error.status = 500;
+    throw error;
+  }
 
-  url.searchParams.set("apiKey", getApiKey());
+  const url = new URL(
+    `https://api.the-odds-api.com/v4${path}`
+  );
+
+  url.searchParams.set("apiKey", apiKey);
 
   for (const [key, value] of Object.entries(params)) {
     if (value !== undefined && value !== null && value !== "") {
@@ -81,21 +124,27 @@ async function oddsRequest(path, params = {}) {
     }
   }
 
-  const response = await fetch(url);
+  const response = await fetch(url.toString(), {
+    headers: {
+      Accept: "application/json"
+    }
+  });
 
   const text = await response.text();
 
   let data;
 
   try {
-    data = JSON.parse(text);
+    data = text ? JSON.parse(text) : null;
   } catch {
-    data = { message: text };
+    data = text;
   }
 
   if (!response.ok) {
     const error = new Error(
-      data.message || data.error || `Odds API HTTP ${response.status}`
+      data && data.message
+        ? data.message
+        : `The Odds API returned HTTP ${response.status}.`
     );
 
     error.status = response.status;
@@ -104,184 +153,430 @@ async function oddsRequest(path, params = {}) {
 
   return {
     data,
-    requestsRemaining: response.headers.get("x-requests-remaining"),
-    requestsUsed: response.headers.get("x-requests-used"),
-    requestsLast: response.headers.get("x-requests-last")
+    requestsRemaining: response.headers.get(
+      "x-requests-remaining"
+    ),
+    requestsUsed: response.headers.get(
+      "x-requests-used"
+    )
   };
 }
 
-// Supabase REST helper
-async function supabaseRequest(
-  table,
-  query = "",
-  options = {}
-) {
-  checkSupabaseConfiguration();
+// ========================================
+// SUPABASE REST REQUEST
+// ========================================
 
-  const url =
-    `${getSupabaseUrl()}/rest/v1/${table}` +
-    (query ? `?${query}` : "");
+async function supabaseRequest(table, query = "", options = {}) {
+  if (!hasSupabaseConfig()) {
+    const error = new Error(
+      "Supabase environment variables are not configured."
+    );
+
+    error.status = 500;
+    throw error;
+  }
+
+  const baseUrl = getSupabaseUrl();
+  const serviceKey = getSupabaseKey();
+
+  const url = new URL(
+    `${baseUrl}/rest/v1/${table}`
+  );
+
+  if (query) {
+    const queryString = query.startsWith("?")
+      ? query.slice(1)
+      : query;
+
+    const searchParams = new URLSearchParams(queryString);
+
+    for (const [key, value] of searchParams.entries()) {
+      url.searchParams.append(key, value);
+    }
+  }
 
   const headers = {
-    apikey: getSupabaseKey(),
-    Authorization: `Bearer ${getSupabaseKey()}`,
-    "Content-Type": "application/json",
-    ...options.headers
+    apikey: serviceKey,
+    Authorization: `Bearer ${serviceKey}`,
+    Accept: "application/json"
   };
 
-  const response = await fetch(url, {
+  if (options.body !== undefined) {
+    headers["Content-Type"] = "application/json";
+  }
+
+  if (options.prefer) {
+    headers.Prefer = options.prefer;
+  }
+
+  const response = await fetch(url.toString(), {
     method: options.method || "GET",
     headers,
-    body: options.body === undefined
-      ? undefined
-      : JSON.stringify(options.body)
+    body:
+      options.body !== undefined
+        ? JSON.stringify(options.body)
+        : undefined
   });
 
   const text = await response.text();
 
   let data = null;
 
-  if (text) {
-    try {
-      data = JSON.parse(text);
-    } catch {
-      data = text;
-    }
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    data = text;
   }
 
   if (!response.ok) {
     const error = new Error(
-      typeof data === "object"
-        ? data.message || data.details || JSON.stringify(data)
-        : String(data)
+      data && data.message
+        ? data.message
+        : `Supabase returned HTTP ${response.status}.`
     );
 
     error.status = response.status;
+    error.details = data;
+
     throw error;
   }
 
   return data;
 }
 
-// Convert errors to JSON
-function sendApiError(res, error) {
-  console.error("FootStats API error:", error.message);
+// ========================================
+// LEAGUE NAME TO ODDS API SPORT KEY
+// ========================================
 
-  res.status(error.status || 500).json({
-    success: false,
-    message: error.message || "Unexpected server error."
-  });
+function getSportKey(league, explicitSportKey) {
+  if (
+    explicitSportKey &&
+    FOOTBALL_LEAGUES.some(item => item.key === explicitSportKey)
+  ) {
+    return explicitSportKey;
+  }
+
+  const name = normalizeText(league);
+
+  const aliases = [
+    {
+      key: "soccer_epl",
+      names: [
+        "premier league",
+        "english premier league",
+        "epl"
+      ]
+    },
+    {
+      key: "soccer_england_efl_champ",
+      names: [
+        "championship",
+        "english championship",
+        "efl championship"
+      ]
+    },
+    {
+      key: "soccer_spain_la_liga",
+      names: [
+        "la liga",
+        "laliga",
+        "spanish la liga"
+      ]
+    },
+    {
+      key: "soccer_germany_bundesliga",
+      names: [
+        "bundesliga",
+        "german bundesliga"
+      ]
+    },
+    {
+      key: "soccer_italy_serie_a",
+      names: [
+        "serie a",
+        "italian serie a",
+        "italy serie a"
+      ]
+    },
+    {
+      key: "soccer_france_ligue_one",
+      names: [
+        "ligue 1",
+        "ligue one",
+        "french ligue 1"
+      ]
+    },
+    {
+      key: "soccer_portugal_primeira_liga",
+      names: [
+        "primeira liga",
+        "portugal first league",
+        "portuguese primeira liga",
+        "liga portugal"
+      ]
+    },
+    {
+      key: "soccer_netherlands_eredivisie",
+      names: [
+        "eredivisie",
+        "netherlands first league",
+        "dutch eredivisie"
+      ]
+    },
+    {
+      key: "soccer_brazil_campeonato",
+      names: [
+        "brazil serie a",
+        "brazilian serie a",
+        "brasileirao",
+        "campeonato brasileiro serie a",
+        "campeonato brasileiro serie a",
+        "brasileirao serie a"
+      ]
+    },
+    {
+      key: "soccer_uefa_champs_league",
+      names: [
+        "champions league",
+        "uefa champions league",
+        "ucl"
+      ]
+    },
+    {
+      key: "soccer_uefa_europa_league",
+      names: [
+        "europa league",
+        "uefa europa league"
+      ]
+    },
+    {
+      key: "soccer_uefa_european_championship",
+      names: [
+        "european championship",
+        "euro",
+        "uefa euro"
+      ]
+    },
+    {
+      key: "soccer_fifa_world_cup",
+      names: [
+        "world cup",
+        "fifa world cup"
+      ]
+    }
+  ];
+
+  for (const group of aliases) {
+    if (group.names.some(alias => normalizeText(alias) === name)) {
+      return group.key;
+    }
+  }
+
+  // Unknown league: don't guess.
+  return null;
 }
 
-// Find best Home/Draw/Away odds
+// ========================================
+// TEAM NAME NORMALIZATION
+// ========================================
+
+const TEAM_ALIASES = {
+  "atletico mineiro": [
+    "ca mineiro",
+    "atletico mineiro",
+    "atletico mg",
+    "atletico mineiro mg"
+  ],
+
+  "red bull bragantino": [
+    "rb bragantino",
+    "bragantino",
+    "bragantino sp",
+    "red bull bragantino"
+  ],
+
+  "athletico paranaense": [
+    "athletico pr",
+    "atletico paranaense",
+    "athletico paranaense"
+  ],
+
+  "gremio": [
+    "gremio",
+    "gremio fbpa"
+  ],
+
+  "internacional": [
+    "internacional",
+    "sc internacional",
+    "internacional rs"
+  ],
+
+  "palmeiras": [
+    "palmeiras",
+    "se palmeiras"
+  ],
+
+  "flamengo": [
+    "flamengo",
+    "cr flamengo"
+  ],
+
+  "corinthians": [
+    "corinthians",
+    "sc corinthians"
+  ],
+
+  "sao paulo": [
+    "sao paulo",
+    "sao paulo fc"
+  ],
+
+  "vasco da gama": [
+    "vasco da gama",
+    "cr vasco da gama",
+    "vasco"
+  ],
+
+  "cruzeiro": [
+    "cruzeiro",
+    "cruzeiro ec"
+  ],
+
+  "botafogo": [
+    "botafogo",
+    "botafogo fr"
+  ],
+
+  "santos": [
+    "santos",
+    "santos fc"
+  ],
+
+  "bahia": [
+    "bahia",
+    "ec bahia"
+  ],
+
+  "fortaleza": [
+    "fortaleza",
+    "fortaleza ec"
+  ],
+
+  "fluminense": [
+    "fluminense",
+    "fluminense fc"
+  ]
+};
+
+const TEAM_ALIAS_LOOKUP = {};
+
+for (const [canonical, names] of Object.entries(TEAM_ALIASES)) {
+  TEAM_ALIAS_LOOKUP[normalizeText(canonical)] = canonical;
+
+  for (const name of names) {
+    TEAM_ALIAS_LOOKUP[normalizeText(name)] = canonical;
+  }
+}
+
+function canonicalTeamName(name) {
+  const normalized = normalizeText(name);
+
+  if (TEAM_ALIAS_LOOKUP[normalized]) {
+    return TEAM_ALIAS_LOOKUP[normalized];
+  }
+
+  // Remove common club prefixes and suffixes.
+  return normalized
+    .replace(
+      /^(fc|cf|sc|ac|as|cd|rc|rcd|real|club|sporting|ca|cr|ec|se)\s+/,
+      ""
+    )
+    .replace(
+      /\s+(fc|cf|sc|ac|as|cd|sa|afc|club|football club|ec|mg|sp|rs|pr)$/,
+      ""
+    )
+    .trim();
+}
+
+function teamsMatch(pickName, eventName) {
+  const a = canonicalTeamName(pickName);
+  const b = canonicalTeamName(eventName);
+
+  if (!a || !b) {
+    return false;
+  }
+
+  if (a === b) {
+    return true;
+  }
+
+  // Allow a strong whole-name containment match only.
+  // This helps with provider naming differences without
+  // matching teams merely because they share one word.
+  if (a.length >= 8 && b.length >= 8) {
+    if (a.startsWith(b + " ") || b.startsWith(a + " ")) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+// ========================================
+// FIXTURE AND ODDS HELPERS
+// ========================================
+
 function getBestOdds(event) {
-  const best = {
+  const markets = event.bookmakers || [];
+
+  const result = {
     home: null,
     draw: null,
     away: null
   };
 
-  const bestBookmakers = {
-    home: null,
-    draw: null,
-    away: null
-  };
-
-  for (const bookmaker of event.bookmakers || []) {
+  for (const bookmaker of markets) {
     for (const market of bookmaker.markets || []) {
       if (market.key !== "h2h") continue;
 
       for (const outcome of market.outcomes || []) {
-        let key = null;
-
         if (outcome.name === event.home_team) {
-          key = "home";
+          result.home = outcome.price;
         } else if (outcome.name === event.away_team) {
-          key = "away";
+          result.away = outcome.price;
         } else if (
-          outcome.name.toLowerCase() === "draw"
+          normalizeText(outcome.name) === "draw"
         ) {
-          key = "draw";
+          result.draw = outcome.price;
         }
+      }
 
-        if (
-          key &&
-          Number.isFinite(Number(outcome.price)) &&
-          (
-            best[key] === null ||
-            Number(outcome.price) > best[key]
-          )
-        ) {
-          best[key] = Number(outcome.price);
-          bestBookmakers[key] = bookmaker.title;
-        }
+      if (result.home !== null && result.away !== null) {
+        return result;
       }
     }
   }
 
-  return { odds: best, bestBookmakers };
+  return result;
 }
 
-// Convert an Odds API event to a fixture
-function mapFixture(event) {
-  const result = getBestOdds(event);
-
+function mapFixture(event, leagueName) {
   return {
-    fixture: {
-      id: event.id,
-      date: event.commence_time,
-      status: "TIMED"
-    },
-
-    league: {
-      id: event.sport_key,
-      name: event.sport_title,
-      country: null
-    },
-
-    teams: {
-      home: {
-        id: null,
-        name: event.home_team,
-        logo: null
-      },
-
-      away: {
-        id: null,
-        name: event.away_team,
-        logo: null
-      }
-    },
-
-    goals: {
-      home: null,
-      away: null
-    },
-
-    odds: result.odds,
-    bestBookmakers: result.bestBookmakers,
-    bookmakers: event.bookmakers || [],
-    source: "The Odds API"
+    id: event.id,
+    fixture_id: event.id,
+    sport_key: event.sport_key || null,
+    league: leagueName || event.sport_title || "",
+    home: event.home_team,
+    away: event.away_team,
+    home_team: event.home_team,
+    away_team: event.away_team,
+    kickoff: event.commence_time,
+    commence_time: event.commence_time,
+    completed: Boolean(event.completed),
+    scores: event.scores || null,
+    odds: getBestOdds(event)
   };
-}
-
-// Match a submitted pick to the final match outcome
-function normalizeChoice(value) {
-  const choice = String(value || "").trim().toLowerCase();
-
-  if (["home", "1", "h", "home win"].includes(choice)) {
-    return "home";
-  }
-
-  if (["draw", "x", "d", "tie"].includes(choice)) {
-    return "draw";
-  }
-
-  if (["away", "2", "a", "away win"].includes(choice)) {
-    return "away";
-  }
-
-  return null;
 }
 
 function getFinalOutcome(event) {
@@ -289,46 +584,150 @@ function getFinalOutcome(event) {
     return null;
   }
 
-  if (!Array.isArray(event.scores) || event.scores.length < 2) {
+  if (!Array.isArray(event.scores)) {
     return null;
   }
 
-  const home = event.scores.find(
-    score => score.name === event.home_team
-  );
+  let homeScore = null;
+  let awayScore = null;
 
-  const away = event.scores.find(
-    score => score.name === event.away_team
-  );
+  for (const score of event.scores) {
+    if (!score || score.score === undefined) continue;
+
+    if (score.name === event.home_team) {
+      homeScore = Number(score.score);
+    }
+
+    if (score.name === event.away_team) {
+      awayScore = Number(score.score);
+    }
+  }
+
+  if (
+    !Number.isFinite(homeScore) ||
+    !Number.isFinite(awayScore)
+  ) {
+    return null;
+  }
+
+  if (homeScore > awayScore) return "home";
+  if (homeScore < awayScore) return "away";
+
+  return "draw";
+}
+
+function normalizeChoice(choice) {
+  const value = normalizeText(choice);
+
+  if (
+    ["h", "1", "home", "home win", "home team"].includes(value)
+  ) {
+    return "home";
+  }
+
+  if (
+    ["d", "x", "draw", "tie"].includes(value)
+  ) {
+    return "draw";
+  }
+
+  if (
+    ["a", "2", "away", "away win", "away team"].includes(value)
+  ) {
+    return "away";
+  }
+
+  return null;
+}
+
+// ========================================
+// MATCH A PICK TO AN ODDS API EVENT
+// ========================================
+
+function getPickKickoff(pick) {
+  const value =
+    pick.kickoff ||
+    pick.commence_time ||
+    pick.date ||
+    pick.match_date;
+
+  if (!value) return null;
+
+  const timestamp = Date.parse(value);
+
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+function getEventKickoff(event) {
+  const timestamp = Date.parse(event.commence_time || "");
+
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+function findMatchingEvent(pick, events) {
+  const home = pick.home || pick.home_team;
+  const away = pick.away || pick.away_team;
 
   if (!home || !away) {
     return null;
   }
 
-  const homeGoals = Number(home.score);
-  const awayGoals = Number(away.score);
+  const pickTime = getPickKickoff(pick);
 
+  const candidates = [];
+
+  for (const event of events) {
+    if (!event.completed) continue;
+
+    const sameHome = teamsMatch(home, event.home_team);
+    const sameAway = teamsMatch(away, event.away_team);
+
+    // Do not reverse home and away.
+    if (!sameHome || !sameAway) continue;
+
+    const eventTime = getEventKickoff(event);
+
+    // Without a kickoff time, don't risk grading the wrong match.
+    if (pickTime === null || eventTime === null) {
+      continue;
+    }
+
+    const difference = Math.abs(pickTime - eventTime);
+
+    // Allow up to six hours of provider kickoff-time difference.
+    if (difference > 6 * 60 * 60 * 1000) {
+      continue;
+    }
+
+    candidates.push({
+      event,
+      difference
+    });
+  }
+
+  candidates.sort((a, b) => a.difference - b.difference);
+
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  // If two candidates are almost equally close, avoid
+  // grading until the match can be identified more reliably.
   if (
-    !Number.isFinite(homeGoals) ||
-    !Number.isFinite(awayGoals)
+    candidates.length > 1 &&
+    Math.abs(
+      candidates[0].difference - candidates[1].difference
+    ) < 60 * 60 * 1000
   ) {
     return null;
   }
 
-  if (homeGoals > awayGoals) {
-    return "home";
-  }
-
-  if (homeGoals < awayGoals) {
-    return "away";
-  }
-
-  return "draw";
+  return candidates[0].event;
 }
 
-// ------------------------------------
+// ========================================
 // BASIC ROUTES
-// ------------------------------------
+// ========================================
 
 app.get("/", (req, res) => {
   res.json({
@@ -343,6 +742,7 @@ app.get("/", (req, res) => {
       "/api/odds?sport=soccer_epl",
       "/api/fixtures?sport=soccer_epl",
       "/api/scores?sport=soccer_epl",
+      "/api/score-predictions",
       "/api/leaderboard"
     ]
   });
@@ -360,251 +760,214 @@ app.get("/api/diagnostic", (req, res) => {
     success: true,
     provider: "The Odds API",
     apiKeyConfigured: Boolean(getApiKey()),
-    supabaseConfigured: Boolean(
-      getSupabaseUrl() && getSupabaseKey()
-    ),
-    scoringSecretConfigured: Boolean(
-      process.env.SCORING_SECRET
-    )
+    supabaseConfigured: hasSupabaseConfig(),
+    scoringSecretConfigured: Boolean(getScoringSecret())
   });
 });
 
 app.get("/api/competitions", (req, res) => {
   res.json({
     success: true,
-    provider: "The Odds API",
-    competitionsReturned: FOOTBALL_LEAGUES.length,
+    count: FOOTBALL_LEAGUES.length,
     response: FOOTBALL_LEAGUES
   });
 });
 
-// ------------------------------------
-// DISCOVER AVAILABLE FOOTBALL LEAGUES
-// ------------------------------------
+// ========================================
+// AVAILABLE SPORTS FROM THE ODDS API
+// ========================================
 
 app.get("/api/odds/sports", async (req, res) => {
   try {
     const result = await oddsRequest("/sports/");
 
-    const sports = (result.data || [])
-      .filter(sport =>
-        sport.key &&
-        sport.key.startsWith("soccer_")
-      )
-      .map(sport => ({
-        key: sport.key,
-        name: sport.title,
-        group: sport.group,
-        active: sport.active
-      }));
-
     res.json({
       success: true,
-      count: sports.length,
-      requestsRemaining: result.requestsRemaining,
-      response: sports
+      response: result.data,
+      requestsRemaining: result.requestsRemaining
     });
   } catch (error) {
-    sendApiError(res, error);
+    sendApiError(
+      res,
+      error.status || 500,
+      "Could not load available sports.",
+      error.message
+    );
   }
 });
 
-// ------------------------------------
+// ========================================
 // ODDS ROUTE
-// ------------------------------------
+// ========================================
 
 app.get("/api/odds", async (req, res) => {
   try {
     const sport = req.query.sport || "soccer_epl";
 
-    if (!/^soccer_[a-z0-9_]+$/.test(sport)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid football sport key."
-      });
-    }
-
     const result = await oddsRequest(
       `/sports/${encodeURIComponent(sport)}/odds/`,
       {
-        regions: "uk,eu",
-        markets: "h2h",
-        oddsFormat: "decimal",
-        dateFormat: "iso"
+        regions: req.query.regions || "uk",
+        markets: req.query.markets || "h2h",
+        oddsFormat: "decimal"
       }
     );
 
     res.json({
       success: true,
       sport,
-      count: result.data.length,
+      count: Array.isArray(result.data)
+        ? result.data.length
+        : 0,
       requestsRemaining: result.requestsRemaining,
-      response: result.data.map(mapFixture)
+      response: result.data
     });
   } catch (error) {
-    sendApiError(res, error);
+    sendApiError(
+      res,
+      error.status || 500,
+      "Could not load odds.",
+      error.message
+    );
   }
 });
 
-// ------------------------------------
+// ========================================
 // FIXTURES ROUTE
-// ------------------------------------
+// ========================================
 
 app.get("/api/fixtures", async (req, res) => {
   try {
-    const sport =
-      req.query.sport ||
-      req.query.league ||
-      "soccer_epl";
-
-    if (!/^soccer_[a-z0-9_]+$/.test(sport)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid football sport key."
-      });
-    }
-
-    const params = {
-      regions: "uk,eu",
-      markets: "h2h",
-      oddsFormat: "decimal",
-      dateFormat: "iso"
-    };
-
-    if (req.query.date) {
-      const start = new Date(`${req.query.date}T00:00:00Z`);
-      const end = new Date(start.getTime() + 86400000);
-
-      if (!Number.isFinite(start.getTime())) {
-        return res.status(400).json({
-          success: false,
-          message: "Invalid date."
-        });
-      }
-
-      params.commenceTimeFrom = start.toISOString();
-      params.commenceTimeTo = end.toISOString();
-    } else {
-      if (req.query.from) {
-        const from = new Date(req.query.from);
-
-        if (!Number.isFinite(from.getTime())) {
-          return res.status(400).json({
-            success: false,
-            message: "Invalid from date."
-          });
-        }
-
-        params.commenceTimeFrom = from.toISOString();
-      }
-
-      if (req.query.to) {
-        const to = new Date(req.query.to);
-
-        if (!Number.isFinite(to.getTime())) {
-          return res.status(400).json({
-            success: false,
-            message: "Invalid to date."
-          });
-        }
-
-        params.commenceTimeTo = to.toISOString();
-      }
-    }
+    const sport = req.query.sport || "soccer_epl";
 
     const result = await oddsRequest(
       `/sports/${encodeURIComponent(sport)}/odds/`,
-      params
+      {
+        regions: req.query.regions || "uk",
+        markets: req.query.markets || "h2h",
+        oddsFormat: "decimal"
+      }
     );
 
-    let events = result.data || [];
+    const fixtures = (Array.isArray(result.data)
+      ? result.data
+      : []
+    ).map(event => mapFixture(event, event.sport_title));
+
+    let filtered = fixtures;
 
     if (req.query.date) {
-      events = events.filter(event =>
-        event.commence_time &&
-        event.commence_time.startsWith(req.query.date)
+      const targetDate = String(req.query.date).slice(0, 10);
+
+      filtered = filtered.filter(item =>
+        String(item.kickoff || "").startsWith(targetDate)
+      );
+    }
+
+    if (req.query.from) {
+      filtered = filtered.filter(item =>
+        String(item.kickoff || "").slice(0, 10) >= req.query.from
+      );
+    }
+
+    if (req.query.to) {
+      filtered = filtered.filter(item =>
+        String(item.kickoff || "").slice(0, 10) <= req.query.to
       );
     }
 
     res.json({
       success: true,
       sport,
-      from: req.query.from || req.query.date || null,
-      to: req.query.to || req.query.date || null,
-      results: events.length,
+      count: filtered.length,
       requestsRemaining: result.requestsRemaining,
-      response: events.map(mapFixture)
+      response: filtered
     });
   } catch (error) {
-    sendApiError(res, error);
+    sendApiError(
+      res,
+      error.status || 500,
+      "Could not load fixtures.",
+      error.message
+    );
   }
 });
 
-// ------------------------------------
-// SCORES ROUTE
-// ------------------------------------
+// ========================================
+// COMPLETED SCORES ROUTE
+// ========================================
 
 app.get("/api/scores", async (req, res) => {
   try {
     const sport = req.query.sport || "soccer_epl";
 
-    if (!/^soccer_[a-z0-9_]+$/.test(sport)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid football sport key."
-      });
+    let daysFrom = Number(req.query.daysFrom || 3);
+
+    if (!Number.isFinite(daysFrom)) {
+      daysFrom = 3;
     }
 
-    const daysFrom = Math.min(
-      3,
-      Math.max(1, Number(req.query.daysFrom) || 3)
-    );
+    daysFrom = Math.max(1, Math.min(3, daysFrom));
 
     const result = await oddsRequest(
       `/sports/${encodeURIComponent(sport)}/scores/`,
       {
-        daysFrom,
-        dateFormat: "iso"
+        daysFrom
       }
     );
 
     res.json({
       success: true,
       sport,
-      count: result.data.length,
+      count: Array.isArray(result.data)
+        ? result.data.length
+        : 0,
       requestsRemaining: result.requestsRemaining,
       response: result.data
     });
   } catch (error) {
-    sendApiError(res, error);
+    sendApiError(
+      res,
+      error.status || 500,
+      "Could not load completed scores.",
+      error.message
+    );
   }
 });
 
-// ------------------------------------
-// SECURE AUTOMATIC SCORING
-// ------------------------------------
+// ========================================
+// AUTOMATIC PREDICTION SCORING
+// ========================================
 
 app.post("/api/score-predictions", async (req, res) => {
   try {
-    const secret = process.env.SCORING_SECRET;
+    const secret = getScoringSecret();
 
     if (!secret) {
-      return res.status(503).json({
-        success: false,
-        message: "SCORING_SECRET is not configured."
-      });
+      return sendApiError(
+        res,
+        500,
+        "SCORING_SECRET is not configured in Render."
+      );
     }
 
     if (req.get("x-scoring-secret") !== secret) {
-      return res.status(401).json({
-        success: false,
-        message: "Unauthorized."
-      });
+      return sendApiError(
+        res,
+        401,
+        "Invalid scoring authorization."
+      );
     }
 
-    checkSupabaseConfiguration();
+    if (!hasSupabaseConfig()) {
+      return sendApiError(
+        res,
+        500,
+        "Supabase is not configured."
+      );
+    }
 
-    // Read pending prediction slips.
+    // Only fetch slips that have not already been graded.
     const entries = await supabaseRequest(
       "prediction_entries",
       "select=id,user_id,picks,point,status&status=eq.pending&limit=500"
@@ -613,14 +976,14 @@ app.post("/api/score-predictions", async (req, res) => {
     if (!Array.isArray(entries) || entries.length === 0) {
       return res.json({
         success: true,
-        message: "No pending prediction slips found.",
+        message: "No pending prediction slips.",
+        checked: 0,
         graded: 0
       });
     }
 
-    // Discover which sports are needed.
-    // Prefer the sport key stored with a pick, if available.
-    const sportsNeeded = new Set();
+    // Identify which sports are needed for pending slips.
+    const requiredSports = new Set();
 
     for (const entry of entries) {
       const picks = Array.isArray(entry.picks)
@@ -628,64 +991,64 @@ app.post("/api/score-predictions", async (req, res) => {
         : [];
 
       for (const pick of picks) {
-        const sport =
-          pick.sport_key ||
-          pick.sport ||
-          (
-            typeof pick.league === "string" &&
-            pick.league.startsWith("soccer_")
-              ? pick.league
-              : null
-          );
+        const sportKey = getSportKey(
+          pick.league,
+          pick.sport_key || pick.sport
+        );
 
-        if (sport && /^soccer_[a-z0-9_]+$/.test(sport)) {
-          sportsNeeded.add(sport);
+        if (sportKey) {
+          requiredSports.add(sportKey);
         }
       }
     }
 
-    // Existing slips may store only a league title.
-    // In that case, try the configured competitions.
-    if (sportsNeeded.size === 0) {
-      for (const league of FOOTBALL_LEAGUES) {
-        sportsNeeded.add(league.key);
-      }
+    // If no league could be identified, do not fetch all
+    // competitions blindly or grade using uncertain data.
+    if (requiredSports.size === 0) {
+      return res.json({
+        success: true,
+        message:
+          "No recognized leagues found in pending slips. Check the league names stored in picks.",
+        checked: entries.length,
+        graded: 0,
+        pending: entries.length
+      });
     }
 
-    const outcomesById = new Map();
-    const scoreErrors = [];
+    // Fetch scores once per required sport.
+    const eventsBySport = new Map();
+    const sportErrors = [];
 
-    // Fetch recent completed scores for relevant sports.
-    // Limit requests to the sports identified above.
-    for (const sport of sportsNeeded) {
+    for (const sportKey of requiredSports) {
       try {
         const result = await oddsRequest(
-          `/sports/${encodeURIComponent(sport)}/scores/`,
+          `/sports/${encodeURIComponent(sportKey)}/scores/`,
           {
-            daysFrom: 3,
-            dateFormat: "iso"
+            daysFrom: 3
           }
         );
 
-        for (const event of result.data || []) {
-          const outcome = getFinalOutcome(event);
-
-          if (outcome) {
-            outcomesById.set(String(event.id), outcome);
-          }
-        }
+        eventsBySport.set(
+          sportKey,
+          Array.isArray(result.data) ? result.data : []
+        );
       } catch (error) {
-        scoreErrors.push({
-          sport,
-          message: error.message
+        sportErrors.push({
+          sport: sportKey,
+          error: error.message
         });
       }
+
+      // Small delay between requests.
+      await sleep(150);
     }
 
     let graded = 0;
-    let waiting = 0;
+    let pending = 0;
     let skipped = 0;
     let pointsAwarded = 0;
+
+    const results = [];
 
     for (const entry of entries) {
       const picks = Array.isArray(entry.picks)
@@ -694,141 +1057,196 @@ app.post("/api/score-predictions", async (req, res) => {
 
       if (picks.length === 0) {
         skipped++;
+
+        results.push({
+          entryId: entry.id,
+          status: "skipped",
+          reason: "No picks found."
+        });
+
         continue;
       }
 
-      let allResultsAvailable = true;
-      let slipPoints = 0;
+      let correct = 0;
+      let unresolved = 0;
+      let invalid = 0;
 
       for (const pick of picks) {
-        const fixtureId =
-          pick.fixture_id ||
-          pick.fixtureId ||
-          pick.id;
+        const sportKey = getSportKey(
+          pick.league,
+          pick.sport_key || pick.sport
+        );
 
-        const outcome = outcomesById.get(String(fixtureId));
+        const choice = normalizeChoice(
+          pick.choice || pick.prediction || pick.selection
+        );
 
-        if (!fixtureId || !outcome) {
-          allResultsAvailable = false;
-          break;
+        if (!sportKey || !choice) {
+          invalid++;
+          unresolved++;
+          continue;
         }
 
-        const selected = normalizeChoice(pick.choice);
+        const events = eventsBySport.get(sportKey);
 
-        if (!selected) {
-          allResultsAvailable = false;
-          break;
+        if (!events) {
+          unresolved++;
+          continue;
         }
 
-        // Three points per correct Home/Draw/Away prediction.
-        if (selected === outcome) {
-          slipPoints += 3;
+        const event = findMatchingEvent(pick, events);
+
+        if (!event) {
+          unresolved++;
+          continue;
+        }
+
+        const outcome = getFinalOutcome(event);
+
+        if (!outcome) {
+          unresolved++;
+          continue;
+        }
+
+        if (choice === outcome) {
+          correct++;
         }
       }
 
-      // Never partially grade a slip.
-      if (!allResultsAvailable) {
-        waiting++;
+      // Never grade a slip while one or more selections
+      // have no reliably matched final result.
+      if (unresolved > 0) {
+        pending++;
+
+        results.push({
+          entryId: entry.id,
+          status: "pending",
+          correctSoFar: correct,
+          totalPicks: picks.length,
+          unresolved,
+          invalidSelections: invalid,
+          reason:
+            "Some matches have no reliably matched final result yet."
+        });
+
         continue;
       }
 
-      // Update only the backend-controlled score and status.
-      await supabaseRequest(
+      // Three points for each correct selection.
+      const points = correct * 3;
+
+      // Update only if this entry is still pending.
+      // This helps prevent repeated scoring.
+      const updated = await supabaseRequest(
         "prediction_entries",
         `id=eq.${encodeURIComponent(entry.id)}&status=eq.pending`,
         {
           method: "PATCH",
-          headers: {
-            Prefer: "return=representation"
-          },
+          prefer: "return=representation",
           body: {
-            point: slipPoints,
+            point: points,
             status: "graded"
           }
         }
       );
 
-      graded++;
-      pointsAwarded += slipPoints;
+      if (Array.isArray(updated) && updated.length > 0) {
+        graded++;
+        pointsAwarded += points;
+
+        results.push({
+          entryId: entry.id,
+          status: "graded",
+          correct,
+          totalPicks: picks.length,
+          points
+        });
+      } else {
+        results.push({
+          entryId: entry.id,
+          status: "not_updated",
+          reason:
+            "The slip was not updated because it may no longer be pending."
+        });
+      }
     }
 
     res.json({
       success: true,
-      message: "Scoring process finished.",
-      slipsFound: entries.length,
+      message: "Prediction scoring check completed.",
+      checked: entries.length,
       graded,
-      waitingForResults: waiting,
+      pending,
       skipped,
       pointsAwarded,
-      sportsChecked: [...sportsNeeded],
-      scoreErrors
+      sportsChecked: Array.from(requiredSports),
+      sportErrors,
+      results
     });
   } catch (error) {
-    sendApiError(res, error);
+    console.error("Scoring error:", error);
+
+    sendApiError(
+      res,
+      error.status || 500,
+      "Could not score predictions.",
+      error.details || error.message
+    );
   }
 });
 
-// ------------------------------------
+// ========================================
 // LEADERBOARD
-// ------------------------------------
+// ========================================
 
 app.get("/api/leaderboard", async (req, res) => {
   try {
-    checkSupabaseConfiguration();
+    const entries = await supabaseRequest(
+      "prediction_entries",
+      "select=user_id,point,status&status=eq.graded&limit=5000"
+    );
 
-    const [profiles, entries] = await Promise.all([
-      supabaseRequest(
-        "profiles",
-        "select=user_id,username"
-      ),
-
-      supabaseRequest(
-        "prediction_entries",
-        "select=user_id,point,status&status=eq.graded&limit=10000"
-      )
-    ]);
+    const profiles = await supabaseRequest(
+      "profiles",
+      "select=user_id,username&limit=5000"
+    );
 
     const totals = new Map();
 
-    for (const profile of profiles || []) {
-      totals.set(String(profile.user_id), {
-        user_id: profile.user_id,
-        username: profile.username || "Player",
+    for (const entry of entries || []) {
+      if (!entry.user_id) continue;
+
+      const current = totals.get(entry.user_id) || {
+        user_id: entry.user_id,
         points: 0,
         gradedSlips: 0
-      });
+      };
+
+      current.points += Number(entry.point || 0);
+      current.gradedSlips += 1;
+
+      totals.set(entry.user_id, current);
     }
 
-    for (const entry of entries || []) {
-      const userId = String(entry.user_id);
+    const usernames = new Map();
 
-      if (!totals.has(userId)) {
-        totals.set(userId, {
-          user_id: entry.user_id,
-          username: "Player",
-          points: 0,
-          gradedSlips: 0
-        });
-      }
-
-      const player = totals.get(userId);
-
-      player.points += Math.max(0, Number(entry.point) || 0);
-      player.gradedSlips++;
+    for (const profile of profiles || []) {
+      usernames.set(
+        profile.user_id,
+        profile.username || "Player"
+      );
     }
 
-    const leaderboard = [...totals.values()]
-      .sort((a, b) =>
-        b.points - a.points ||
-        b.gradedSlips - a.gradedSlips ||
-        a.username.localeCompare(b.username)
-      )
-      .slice(0, 100)
-      .map((player, index) => ({
+    const leaderboard = Array.from(totals.values())
+      .map(item => ({
+        username: usernames.get(item.user_id) || "Player",
+        points: item.points,
+        gradedSlips: item.gradedSlips
+      }))
+      .sort((a, b) => b.points - a.points)
+      .map((item, index) => ({
         rank: index + 1,
-        username: player.username,
-        points: player.points,
-        gradedSlips: player.gradedSlips
+        ...item
       }));
 
     res.json({
@@ -837,25 +1255,33 @@ app.get("/api/leaderboard", async (req, res) => {
       response: leaderboard
     });
   } catch (error) {
-    sendApiError(res, error);
+    console.error("Leaderboard error:", error);
+
+    sendApiError(
+      res,
+      error.status || 500,
+      "Could not load leaderboard.",
+      error.details || error.message
+    );
   }
 });
 
-// ------------------------------------
+// ========================================
 // UNKNOWN ROUTES
-// ------------------------------------
+// ========================================
 
 app.use((req, res) => {
   res.status(404).json({
     success: false,
-    message: "Route not found."
+    error: "Endpoint not found.",
+    path: req.path
   });
 });
 
-// ------------------------------------
+// ========================================
 // START SERVER
-// ------------------------------------
+// ========================================
 
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`FootStats backend listening on port ${PORT}`);
+app.listen(PORT, () => {
+  console.log(`FootStats Backend running on port ${PORT}`);
 }); 
