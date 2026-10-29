@@ -19,6 +19,78 @@ const TABLE = "prediction_entries";
 const TZ = "Africa/Lagos";
 const POINTS_MULTIPLIER = 100;
 
+const FIXTURES_CACHE_MS = 60 * 1000;
+const FIXTURES_CONCURRENCY = 5;
+
+let fixturesCache = {
+  date: "",
+  expiresAt: 0,
+  data: null
+};
+
+/* -------------------------------------------------------
+   50 COMPETITIONS
+
+   These are the competition keys returned by your
+   /api/competitions endpoint.
+
+   The Odds API can change availability by season.
+   A listed competition may temporarily have no fixtures.
+------------------------------------------------------- */
+
+const COMPETITIONS = [
+  { key: "soccer_argentina_primera_division", name: "Primera División - Argentina" },
+  { key: "soccer_australia_aleague", name: "A-League" },
+  { key: "soccer_austria_bundesliga", name: "Austrian Football Bundesliga" },
+  { key: "soccer_belgium_first_div", name: "Belgium First Div" },
+  { key: "soccer_brazil_campeonato", name: "Brazil Série A" },
+  { key: "soccer_brazil_serie_b", name: "Brazil Série B" },
+  { key: "soccer_chile_campeonato", name: "Primera División - Chile" },
+  { key: "soccer_china_superleague", name: "Super League - China" },
+  { key: "soccer_conmebol_copa_libertadores", name: "Copa Libertadores" },
+  { key: "soccer_conmebol_copa_sudamericana", name: "Copa Sudamericana" },
+  { key: "soccer_denmark_superliga", name: "Denmark Superliga" },
+  { key: "soccer_efl_champ", name: "Championship" },
+  { key: "soccer_england_efl_cup", name: "EFL Cup" },
+  { key: "soccer_england_league1", name: "League 1" },
+  { key: "soccer_england_league2", name: "League 2" },
+  { key: "soccer_epl", name: "EPL" },
+  { key: "soccer_finland_veikkausliiga", name: "Veikkausliiga - Finland" },
+  { key: "soccer_france_ligue_one", name: "Ligue 1 - France" },
+  { key: "soccer_france_ligue_two", name: "Ligue 2 - France" },
+  { key: "soccer_germany_bundesliga", name: "Bundesliga - Germany" },
+  { key: "soccer_germany_bundesliga2", name: "Bundesliga 2 - Germany" },
+  { key: "soccer_germany_bundesliga_women", name: "Frauen-Bundesliga" },
+  { key: "soccer_germany_liga3", name: "3. Liga - Germany" },
+  { key: "soccer_greece_super_league", name: "Super League - Greece" },
+  { key: "soccer_italy_serie_a", name: "Serie A - Italy" },
+  { key: "soccer_italy_serie_b", name: "Serie B - Italy" },
+  { key: "soccer_japan_j_league", name: "J League" },
+  { key: "soccer_korea_kleague1", name: "K League 1" },
+  { key: "soccer_league_of_ireland", name: "League of Ireland" },
+  { key: "soccer_mexico_ligamx", name: "Liga MX" },
+  { key: "soccer_netherlands_eredivisie", name: "Dutch Eredivisie" },
+  { key: "soccer_norway_eliteserien", name: "Eliteserien - Norway" },
+  { key: "soccer_poland_ekstraklasa", name: "Ekstraklasa - Poland" },
+  { key: "soccer_portugal_primeira_liga", name: "Primeira Liga - Portugal" },
+  { key: "soccer_russia_premier_league", name: "Premier League - Russia" },
+  { key: "soccer_saudi_arabia_pro_league", name: "Saudi Pro League" },
+  { key: "soccer_spain_copa_del_rey", name: "Copa del Rey" },
+  { key: "soccer_spain_la_liga", name: "La Liga - Spain" },
+  { key: "soccer_spain_segunda_division", name: "La Liga 2 - Spain" },
+  { key: "soccer_spl", name: "Premiership - Scotland" },
+  { key: "soccer_sweden_allsvenskan", name: "Allsvenskan - Sweden" },
+  { key: "soccer_sweden_superettan", name: "Superettan - Sweden" },
+  { key: "soccer_switzerland_superleague", name: "Swiss Superleague" },
+  { key: "soccer_turkey_super_league", name: "Turkey Super League" },
+  { key: "soccer_uefa_champs_league", name: "UEFA Champions League" },
+  { key: "soccer_uefa_champs_league_women", name: "UEFA Champions League Women" },
+  { key: "soccer_uefa_europa_conference_league", name: "UEFA Europa Conference League" },
+  { key: "soccer_uefa_europa_league", name: "UEFA Europa League" },
+  { key: "soccer_uefa_nations_league", name: "UEFA Nations League" },
+  { key: "soccer_usa_mls", name: "MLS" }
+];
+
 /* -------------------------------------------------------
    BASIC HELPERS
 ------------------------------------------------------- */
@@ -32,8 +104,11 @@ function todayNigeria() {
   }).formatToParts(new Date());
 
   const p = {};
+
   for (const item of parts) {
-    if (item.type !== "literal") p[item.type] = item.value;
+    if (item.type !== "literal") {
+      p[item.type] = item.value;
+    }
   }
 
   return `${p.year}-${p.month}-${p.day}`;
@@ -43,6 +118,7 @@ function dateInNigeria(value) {
   if (!value) return "";
 
   const date = new Date(value);
+
   if (Number.isNaN(date.getTime())) return "";
 
   const parts = new Intl.DateTimeFormat("en-GB", {
@@ -53,8 +129,11 @@ function dateInNigeria(value) {
   }).formatToParts(date);
 
   const p = {};
+
   for (const item of parts) {
-    if (item.type !== "literal") p[item.type] = item.value;
+    if (item.type !== "literal") {
+      p[item.type] = item.value;
+    }
   }
 
   return `${p.year}-${p.month}-${p.day}`;
@@ -62,6 +141,19 @@ function dateInNigeria(value) {
 
 function isTodayNigeria(value) {
   return dateInNigeria(value) === todayNigeria();
+}
+
+function getNigeriaDayBounds() {
+  const date = todayNigeria();
+
+  const start = new Date(`${date}T00:00:00+01:00`);
+  const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+
+  return {
+    date,
+    from: start.toISOString(),
+    to: end.toISOString()
+  };
 }
 
 function sendError(res, status, message, extra = {}) {
@@ -151,6 +243,7 @@ async function oddsRequest(path, params = {}) {
   }
 
   const url = new URL(`${ODDS_BASE}${path}`);
+
   url.searchParams.set("apiKey", ODDS_API_KEY);
 
   for (const [key, value] of Object.entries(params)) {
@@ -163,11 +256,18 @@ async function oddsRequest(path, params = {}) {
   const text = await response.text();
 
   let data;
+
   try {
     data = text ? JSON.parse(text) : {};
   } catch {
     data = { message: text };
   }
+
+  const quota = {
+    remaining: response.headers.get("x-requests-remaining"),
+    used: response.headers.get("x-requests-used"),
+    last: response.headers.get("x-requests-last")
+  };
 
   if (!response.ok) {
     const message =
@@ -176,20 +276,16 @@ async function oddsRequest(path, params = {}) {
       `The Odds API returned HTTP ${response.status}`;
 
     const error = new Error(message);
+
     error.status = response.status;
-    error.quota = {
-      remaining: response.headers.get("x-requests-remaining"),
-      used: response.headers.get("x-requests-used"),
-      last: response.headers.get("x-requests-last")
-    };
+    error.quota = quota;
+
     throw error;
   }
 
   return {
     data,
-    remaining: response.headers.get("x-requests-remaining"),
-    used: response.headers.get("x-requests-used"),
-    last: response.headers.get("x-requests-last")
+    ...quota
   };
 }
 
@@ -210,6 +306,7 @@ async function supabaseRequest(path, options = {}) {
 
   const response = await fetch(url, {
     method: options.method || "GET",
+
     headers: {
       apikey: SUPABASE_SERVICE_ROLE_KEY,
       Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
@@ -217,6 +314,7 @@ async function supabaseRequest(path, options = {}) {
       Prefer: options.prefer || "return=representation",
       ...(options.headers || {})
     },
+
     body: options.body === undefined
       ? undefined
       : JSON.stringify(options.body)
@@ -225,6 +323,7 @@ async function supabaseRequest(path, options = {}) {
   const text = await response.text();
 
   let data;
+
   try {
     data = text ? JSON.parse(text) : null;
   } catch {
@@ -244,9 +343,6 @@ async function supabaseRequest(path, options = {}) {
 
 /* -------------------------------------------------------
    MARKET REFERENCE CATALOGUE
-
-   This is a reference list, not a guarantee that every
-   market is offered for every sport, event or bookmaker.
 ------------------------------------------------------- */
 
 const MARKET_CATALOG = [
@@ -284,7 +380,10 @@ const MARKET_CATALOG = [
 
 function marketLabel(key) {
   const item = MARKET_CATALOG.find(m => m.key === key);
-  return item ? item.name : String(key || "").replace(/_/g, " ");
+
+  return item
+    ? item.name
+    : String(key || "").replace(/_/g, " ");
 }
 
 /* -------------------------------------------------------
@@ -316,6 +415,7 @@ function getBestMarkets(event) {
 
       for (const outcome of market.outcomes || []) {
         const price = safeNumber(outcome.price);
+
         if (price === null || price <= 1) continue;
 
         const identity =
@@ -369,25 +469,32 @@ function normalizeEvent(event) {
     id: event.id,
     event_id: event.id,
     fixture_id: event.id,
+
     sport_key: event.sport_key,
     sport_title: event.sport_title,
     league: event.sport_title,
+
     home: event.home_team,
     away: event.away_team,
     home_team: event.home_team,
     away_team: event.away_team,
+
     date: event.commence_time,
     kickoff: event.commence_time,
     commence_time: event.commence_time,
+
     status: event.completed ? "FINISHED" : "TIMED",
+
     odds: {
       home: homeOdds,
       draw: drawOdds,
       away: awayOdds
     },
+
     home_odds: homeOdds,
     draw_odds: drawOdds,
     away_odds: awayOdds,
+
     markets,
     market_list: marketArray
   };
@@ -404,6 +511,7 @@ app.get("/", (req, res) => {
     provider: "The Odds API",
     timezone: TZ,
     predictionDate: todayNigeria(),
+
     endpoints: [
       "/api/health",
       "/api/diagnostic",
@@ -414,6 +522,7 @@ app.get("/", (req, res) => {
       "/api/markets?sport=soccer_epl&eventId=EVENT_ID",
       "/api/event-odds?sport=soccer_epl&eventId=EVENT_ID&markets=h2h,totals",
       "/api/fixtures",
+      "/api/fixtures?limit=5",
       "/api/scores?sport=soccer_epl",
       "/api/score-predictions",
       "/api/leaderboard"
@@ -428,8 +537,11 @@ app.get("/api/health", (req, res) => {
     provider: "The Odds API",
     timezone: TZ,
     predictionDate: todayNigeria(),
+    competitionsConfigured: COMPETITIONS.length,
     oddsConfigured: Boolean(ODDS_API_KEY),
-    supabaseConfigured: Boolean(SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY)
+    supabaseConfigured: Boolean(
+      SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY
+    )
   });
 });
 
@@ -439,8 +551,11 @@ app.get("/api/diagnostic", (req, res) => {
     provider: "The Odds API",
     timezone: TZ,
     predictionDate: todayNigeria(),
+    competitionsConfigured: COMPETITIONS.length,
     oddsApiKeyConfigured: Boolean(ODDS_API_KEY),
-    supabaseConfigured: Boolean(SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY),
+    supabaseConfigured: Boolean(
+      SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY
+    ),
     scoringSecretConfigured: Boolean(SCORING_SECRET)
   });
 });
@@ -449,7 +564,6 @@ app.get("/api/diagnostic", (req, res) => {
    MARKET ENDPOINTS
 ------------------------------------------------------- */
 
-// Reference catalogue only; actual availability must be checked per event.
 app.get("/api/markets/catalog", (req, res) => {
   res.json({
     success: true,
@@ -460,11 +574,14 @@ app.get("/api/markets/catalog", (req, res) => {
   });
 });
 
-// Discover the markets recently observed for one event.
 app.get("/api/markets", async (req, res) => {
   try {
     const sport = String(req.query.sport || "").trim();
-    const eventId = String(req.query.eventId || req.query.event_id || "").trim();
+
+    const eventId = String(
+      req.query.eventId || req.query.event_id || ""
+    ).trim();
+
     const regions = String(req.query.regions || "uk").trim();
 
     if (!sport || !eventId) {
@@ -481,7 +598,10 @@ app.get("/api/markets", async (req, res) => {
     );
 
     const data = result.data || {};
-    const bookmakers = Array.isArray(data.bookmakers) ? data.bookmakers : [];
+    const bookmakers = Array.isArray(data.bookmakers)
+      ? data.bookmakers
+      : [];
+
     const unique = new Map();
 
     for (const bookmaker of bookmakers) {
@@ -508,12 +628,14 @@ app.get("/api/markets", async (req, res) => {
       provider: "The Odds API",
       sport,
       eventId,
+
       event: {
         id: data.id || eventId,
         home_team: data.home_team || null,
         away_team: data.away_team || null,
         commence_time: data.commence_time || null
       },
+
       regions,
       count: unique.size,
       markets: Array.from(unique.values()),
@@ -525,12 +647,16 @@ app.get("/api/markets", async (req, res) => {
   }
 });
 
-// Fetch prices for selected event-specific markets.
 app.get("/api/event-odds", async (req, res) => {
   try {
     const sport = String(req.query.sport || "").trim();
-    const eventId = String(req.query.eventId || req.query.event_id || "").trim();
+
+    const eventId = String(
+      req.query.eventId || req.query.event_id || ""
+    ).trim();
+
     const regions = String(req.query.regions || "uk").trim();
+
     const markets = String(req.query.markets || "")
       .split(",")
       .map(s => s.trim())
@@ -563,19 +689,28 @@ app.get("/api/event-odds", async (req, res) => {
     );
 
     const data = result.data || {};
+
     const bookmakers = (data.bookmakers || []).map(bookmaker => ({
       key: bookmaker.key,
       title: bookmaker.title,
       last_update: bookmaker.last_update,
+
       markets: (bookmaker.markets || []).map(market => ({
         key: market.key,
         name: marketLabel(market.key),
         last_update: market.last_update,
+
         outcomes: (market.outcomes || []).map(outcome => ({
           name: outcome.name,
           price: safeNumber(outcome.price),
-          ...(outcome.point !== undefined ? { point: outcome.point } : {}),
-          ...(outcome.description ? { description: outcome.description } : {})
+
+          ...(outcome.point !== undefined
+            ? { point: outcome.point }
+            : {}),
+
+          ...(outcome.description
+            ? { description: outcome.description }
+            : {})
         }))
       }))
     }));
@@ -585,18 +720,22 @@ app.get("/api/event-odds", async (req, res) => {
       provider: "The Odds API",
       sport,
       eventId,
+
       event: {
         id: data.id || eventId,
         home_team: data.home_team || null,
         away_team: data.away_team || null,
         commence_time: data.commence_time || null
       },
+
       requestedMarkets: markets,
       regions,
       bookmakers,
+
       availableMarketKeys: Array.from(new Set(
         bookmakers.flatMap(b => b.markets.map(m => m.key))
       )),
+
       requestsRemaining: result.remaining,
       requestsUsed: result.used,
       requestsLast: result.last
@@ -636,40 +775,28 @@ app.get("/api/odds/sports", async (req, res) => {
   }
 });
 
-app.get("/api/competitions", async (req, res) => {
-  try {
-    const result = await oddsRequest("/sports", { all: "false" });
-
-    const competitions = (result.data || [])
-      .filter(sport =>
-        sport.active !== false &&
-        String(sport.key).startsWith("soccer_")
-      )
-      .map(sport => ({
-        id: sport.key,
-        key: sport.key,
-        name: sport.title,
-        title: sport.title,
-        group: sport.group
-      }));
-
-    res.json({
-      success: true,
-      provider: "The Odds API",
-      competitionsReturned: competitions.length,
-      competitions,
-      requestsRemaining: result.remaining
-    });
-  } catch (error) {
-    sendApiError(res, error);
-  }
+/*
+  This route uses the saved 50-competition list.
+  It does not call The Odds API and therefore does
+  not consume an API request.
+*/
+app.get("/api/competitions", (req, res) => {
+  res.json({
+    success: true,
+    provider: "The Odds API",
+    competitionsReturned: COMPETITIONS.length,
+    competitions: COMPETITIONS.map(sport => ({
+      id: sport.key,
+      key: sport.key,
+      name: sport.name,
+      title: sport.name,
+      group: "Soccer"
+    }))
+  });
 });
 
 /* -------------------------------------------------------
    STANDARD ODDS ENDPOINT
-
-   Featured-market endpoint: do not request event-specific
-   markets such as btts here.
 ------------------------------------------------------- */
 
 app.get("/api/odds", async (req, res) => {
@@ -685,13 +812,18 @@ app.get("/api/odds", async (req, res) => {
     }
 
     const regions = String(req.query.regions || "uk").trim();
-    const requestedMarkets = String(req.query.markets || "h2h,totals,spreads")
+
+    const requestedMarkets = String(
+      req.query.markets || "h2h,totals,spreads"
+    )
       .split(",")
       .map(s => s.trim())
       .filter(Boolean);
 
     const eventSpecific = requestedMarkets.filter(key =>
-      MARKET_CATALOG.some(m => m.key === key && m.endpoint === "event")
+      MARKET_CATALOG.some(
+        m => m.key === key && m.endpoint === "event"
+      )
     );
 
     if (eventSpecific.length) {
@@ -731,90 +863,221 @@ app.get("/api/odds", async (req, res) => {
 });
 
 /* -------------------------------------------------------
+   FIXTURE FETCHING HELPERS
+------------------------------------------------------- */
+
+async function fetchCompetitionFixtures(sport, bounds) {
+  const result = await oddsRequest(
+    `/sports/${encodeURIComponent(sport.key)}/odds`,
+    {
+      regions: "uk",
+      markets: "h2h",
+      oddsFormat: "decimal",
+      dateFormat: "iso",
+      commenceTimeFrom: bounds.from,
+      commenceTimeTo: bounds.to
+    }
+  );
+
+  return {
+    sport,
+    matches: (result.data || []).map(event => ({
+      ...normalizeEvent(event),
+      league: sport.name,
+      sport_title: sport.name,
+      sport_key: sport.key
+    })),
+    quota: {
+      remaining: result.remaining,
+      used: result.used,
+      last: result.last
+    }
+  };
+}
+
+async function mapWithConcurrency(items, concurrency, worker) {
+  const results = new Array(items.length);
+  let nextIndex = 0;
+
+  async function runWorker() {
+    while (true) {
+      const index = nextIndex++;
+
+      if (index >= items.length) return;
+
+      try {
+        results[index] = {
+          status: "fulfilled",
+          value: await worker(items[index], index)
+        };
+      } catch (error) {
+        results[index] = {
+          status: "rejected",
+          reason: error
+        };
+      }
+    }
+  }
+
+  const workerCount = Math.min(
+    Math.max(concurrency, 1),
+    items.length
+  );
+
+  await Promise.all(
+    Array.from({ length: workerCount }, () => runWorker())
+  );
+
+  return results;
+}
+
+/* -------------------------------------------------------
    PREDICTION CHALLENGE FIXTURES
 
-   Upcoming matches scheduled for today in Nigeria time.
+   Default: all 50 configured competitions.
+
+   ?limit=5 limits a test to the first five competitions.
+
+   Fixtures are filtered by Nigeria's calendar day.
+   We deliberately do not remove an event merely because
+   its kickoff time has passed.
+
+   Results are cached for 60 seconds per Nigeria date.
 ------------------------------------------------------- */
 
 app.get("/api/fixtures", async (req, res) => {
   try {
-    const sportsResult = await oddsRequest("/sports", { all: "false" });
+    const bounds = getNigeriaDayBounds();
 
-    const sports = (sportsResult.data || []).filter(s =>
-      s.active !== false &&
-      String(s.key).startsWith("soccer_")
-    );
+    const requestedLimit = parseInt(req.query.limit || "50", 10);
 
     const limit = Math.min(
-      Math.max(parseInt(req.query.limit || "10", 10) || 10, 1),
-      20
+      Math.max(
+        Number.isFinite(requestedLimit) ? requestedLimit : 50,
+        1
+      ),
+      COMPETITIONS.length
     );
 
-    const selectedSports = sports.slice(0, limit);
+    const selectedSports = COMPETITIONS.slice(0, limit);
 
-    const results = await Promise.allSettled(
-      selectedSports.map(async sport => {
-        const result = await oddsRequest(
-          `/sports/${encodeURIComponent(sport.key)}/odds`,
-          {
-            regions: "uk",
-            markets: "h2h",
-            oddsFormat: "decimal",
-            dateFormat: "iso"
-          }
-        );
+    const cacheKey = `${bounds.date}|${limit}`;
 
-        return (result.data || []).map(normalizeEvent);
-      })
+    if (
+      fixturesCache.data &&
+      fixturesCache.date === cacheKey &&
+      Date.now() < fixturesCache.expiresAt
+    ) {
+      return res.json({
+        ...fixturesCache.data,
+        cached: true
+      });
+    }
+
+    const results = await mapWithConcurrency(
+      selectedSports,
+      FIXTURES_CONCURRENCY,
+      sport => fetchCompetitionFixtures(sport, bounds)
     );
 
     const matches = [];
     const errors = [];
+    const successfulCompetitions = [];
+    const quotaReports = [];
 
-    results.forEach((result, index) => {
+    for (let i = 0; i < results.length; i++) {
+      const result = results[i];
+      const sport = selectedSports[i];
+
       if (result.status === "fulfilled") {
-        matches.push(...result.value);
+        successfulCompetitions.push({
+          key: sport.key,
+          name: sport.name,
+          matchesReturned: result.value.matches.length
+        });
+
+        matches.push(...result.value.matches);
+
+        quotaReports.push({
+          competition: sport.key,
+          ...result.value.quota
+        });
       } else {
         errors.push({
-          sport: selectedSports[index].key,
-          error: result.reason?.message || "Request failed"
+          competition: sport.key,
+          name: sport.name,
+          error: result.reason?.message || "Request failed",
+          status: result.reason?.status || null,
+          ...(result.reason?.quota
+            ? { quota: result.reason.quota }
+            : {})
         });
       }
-    });
+    }
 
-    const now = Date.now();
-
+    /*
+      Keep only events whose kickoff falls on today's
+      Nigeria calendar date. Do not check kickoff > now:
+      a match may already have started and still be returned
+      by the provider.
+    */
     const todaysMatches = matches
-      .filter(match => {
-        const kickoff = new Date(match.kickoff).getTime();
-
-        return Number.isFinite(kickoff) &&
-          kickoff > now &&
-          isTodayNigeria(match.kickoff);
-      })
+      .filter(match =>
+        match.event_id &&
+        match.kickoff &&
+        isTodayNigeria(match.kickoff)
+      )
       .sort((a, b) =>
-        new Date(a.kickoff) - new Date(b.kickoff)
+        new Date(a.kickoff).getTime() -
+        new Date(b.kickoff).getTime()
       );
 
+    /*
+      Deduplicate events by Odds API event ID.
+    */
     const unique = [];
     const seen = new Set();
 
     for (const match of todaysMatches) {
-      if (seen.has(match.event_id)) continue;
-      seen.add(match.event_id);
+      const id = String(match.event_id);
+
+      if (seen.has(id)) continue;
+
+      seen.add(id);
       unique.push(match);
     }
 
-    res.json({
+    const payload = {
       success: true,
       provider: "The Odds API",
       timezone: TZ,
-      date: todayNigeria(),
+      date: bounds.date,
+
+      competitionsAvailable: COMPETITIONS.length,
+      competitionsRequested: selectedSports.length,
+      competitionsChecked: successfulCompetitions.length,
+      competitionsFailed: errors.length,
+
       count: unique.length,
       matches: unique,
-      errors
-    });
+
+      successfulCompetitions,
+      errors,
+      quota: quotaReports,
+
+      cached: false,
+      cacheSeconds: FIXTURES_CACHE_MS / 1000
+    };
+
+    fixturesCache = {
+      date: cacheKey,
+      expiresAt: Date.now() + FIXTURES_CACHE_MS,
+      data: payload
+    };
+
+    res.json(payload);
   } catch (error) {
+    console.error("Fixtures error:", error);
     sendApiError(res, error);
   }
 });
@@ -896,12 +1159,13 @@ function normalizeH2HSelection(selection, homeName, awayName) {
 
 /*
   Returns true, false, or null.
-  null means this backend cannot safely settle the selection.
+  null means the selection cannot safely be settled.
 */
 function settlePick(pick, event) {
   if (!event || event.completed !== true) return null;
 
   const score = readScores(event);
+
   if (!score) return null;
 
   const homeName = event.home_team || getTeamNames(pick).home;
@@ -909,6 +1173,7 @@ function settlePick(pick, event) {
 
   const market = getMarketKey(pick);
   const selection = getSelection(pick);
+
   const { home, away } = score;
 
   if (market === "h2h" || market === "h2h_3_way") {
@@ -920,35 +1185,58 @@ function settlePick(pick, event) {
 
     if (!selected) return null;
 
-    const actual = home > away ? "H" : home < away ? "A" : "D";
+    const actual =
+      home > away ? "H" :
+      home < away ? "A" :
+      "D";
+
     return selected === actual;
   }
 
   if (market === "totals") {
     const s = normalizeText(selection);
     const total = home + away;
-    const match = s.match(/^(over|under)\s*(\d+(?:\.\d+)?)$/);
+
+    const match = s.match(
+      /^(over|under)\s*(\d+(?:\.\d+)?)$/
+    );
 
     if (!match) return null;
 
     const line = Number(match[2]);
 
     if (match[1] === "over") return total > line;
+
     return total < line;
   }
 
   if (market === "btts") {
     const s = normalizeText(selection);
-    const yes = ["yes", "btts yes", "both teams to score yes"];
-    const no = ["no", "btts no", "both teams to score no"];
 
-    if (yes.includes(s)) return home > 0 && away > 0;
-    if (no.includes(s)) return home === 0 || away === 0;
+    const yes = [
+      "yes",
+      "btts yes",
+      "both teams to score yes"
+    ];
+
+    const no = [
+      "no",
+      "btts no",
+      "both teams to score no"
+    ];
+
+    if (yes.includes(s)) {
+      return home > 0 && away > 0;
+    }
+
+    if (no.includes(s)) {
+      return home === 0 || away === 0;
+    }
 
     return null;
   }
 
-  // Never grade unsupported markets using guessed rules.
+  // Do not grade unsupported markets using guessed rules.
   return null;
 }
 
@@ -966,13 +1254,16 @@ function calculateTicket(picks, scoreEvents) {
 
   const updatedPicks = picks.map(original => {
     const pick = { ...original };
+
     const eventId = getEventId(pick);
     const sportKey = getSportKey(pick);
 
     if (!eventId || !sportKey) {
       allSettled = false;
+
       pick.settlement_note =
         "Legacy selection: missing exact Odds API event ID or sport key.";
+
       return pick;
     }
 
@@ -987,8 +1278,10 @@ function calculateTicket(picks, scoreEvents) {
 
     if (won === null) {
       allSettled = false;
+
       pick.settlement_note =
         "This market or selection could not be settled safely.";
+
       return pick;
     }
 
@@ -1002,6 +1295,7 @@ function calculateTicket(picks, scoreEvents) {
 
       if (odds === null) {
         allSettled = false;
+
         pick.settlement_note =
           "Final result found, but saved decimal odds are missing.";
       } else {
@@ -1025,7 +1319,9 @@ function calculateTicket(picks, scoreEvents) {
   return {
     state: "graded",
     picks: updatedPicks,
-    points: anyLoss ? 0 : Math.round(totalPoints * 100) / 100,
+    points: anyLoss
+      ? 0
+      : Math.round(totalPoints * 100) / 100,
     anyLoss
   };
 }
@@ -1087,7 +1383,10 @@ app.post("/api/score-predictions", async (req, res) => {
     for (const entry of pendingEntries) {
       for (const pick of Array.isArray(entry.picks) ? entry.picks : []) {
         const sportKey = getSportKey(pick);
-        if (sportKey && getEventId(pick)) sports.add(sportKey);
+
+        if (sportKey && getEventId(pick)) {
+          sports.add(sportKey);
+        }
       }
     }
 
@@ -1136,6 +1435,7 @@ app.post("/api/score-predictions", async (req, res) => {
         {
           method: "PATCH",
           prefer: "return=representation",
+
           body: {
             picks: outcome.picks,
             point: points,
@@ -1188,6 +1488,7 @@ app.get("/api/leaderboard", async (req, res) => {
 
     for (const entry of entries || []) {
       const userId = entry.user_id;
+
       if (!userId) continue;
 
       const points = safeNumber(entry.points ?? entry.point) || 0;
@@ -1200,6 +1501,7 @@ app.get("/api/leaderboard", async (req, res) => {
 
       existing.points += points;
       existing.tickets += 1;
+
       totals.set(userId, existing);
     }
 
@@ -1233,5 +1535,6 @@ app.get("/api/leaderboard", async (req, res) => {
 app.listen(PORT, () => {
   console.log(`FootStats backend running on port ${PORT}`);
   console.log("Provider: The Odds API");
+  console.log(`Competitions configured: ${COMPETITIONS.length}`);
   console.log(`Nigeria prediction date: ${todayNigeria()}`);
 }); 
