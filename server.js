@@ -16,7 +16,6 @@ const SCORING_SECRET = process.env.SCORING_SECRET;
 
 const ODDS_BASE = "https://api.the-odds-api.com/v4";
 const TABLE = "prediction_entries";
-
 const TZ = "Africa/Lagos";
 const POINTS_MULTIPLIER = 100;
 
@@ -140,21 +139,18 @@ function getSavedOdds(pick) {
   return odds !== null && odds > 1 ? odds : null;
 }
 
-function getKickoff(pick) {
-  return pick.kickoff || pick.commence_time || pick.date || null;
-}
-
 /* -------------------------------------------------------
-   EXTERNAL API HELPERS
+   ODDS API HELPERS
 ------------------------------------------------------- */
 
 async function oddsRequest(path, params = {}) {
   if (!ODDS_API_KEY) {
-    throw new Error("ODDS_API_KEY is missing in Render environment variables.");
+    throw new Error(
+      "ODDS_API_KEY is missing in Render environment variables."
+    );
   }
 
   const url = new URL(`${ODDS_BASE}${path}`);
-
   url.searchParams.set("apiKey", ODDS_API_KEY);
 
   for (const [key, value] of Object.entries(params)) {
@@ -181,6 +177,11 @@ async function oddsRequest(path, params = {}) {
 
     const error = new Error(message);
     error.status = response.status;
+    error.quota = {
+      remaining: response.headers.get("x-requests-remaining"),
+      used: response.headers.get("x-requests-used"),
+      last: response.headers.get("x-requests-last")
+    };
     throw error;
   }
 
@@ -190,6 +191,12 @@ async function oddsRequest(path, params = {}) {
     used: response.headers.get("x-requests-used"),
     last: response.headers.get("x-requests-last")
   };
+}
+
+function sendApiError(res, error) {
+  return sendError(res, error.status || 502, error.message, {
+    ...(error.quota ? { quota: error.quota } : {})
+  });
 }
 
 async function supabaseRequest(path, options = {}) {
@@ -236,22 +243,53 @@ async function supabaseRequest(path, options = {}) {
 }
 
 /* -------------------------------------------------------
-   ODDS NORMALIZATION
+   MARKET REFERENCE CATALOGUE
+
+   This is a reference list, not a guarantee that every
+   market is offered for every sport, event or bookmaker.
 ------------------------------------------------------- */
 
-function marketLabel(key) {
-  const labels = {
-    h2h: "Match Result",
-    totals: "Over/Under",
-    btts: "Both Teams to Score",
-    spreads: "Handicap",
-    draw_no_bet: "Draw No Bet",
-    double_chance: "Double Chance",
-    h2h_3_way: "Home / Draw / Away"
-  };
+const MARKET_CATALOG = [
+  { key: "h2h", name: "Head to Head / Match Winner", endpoint: "featured" },
+  { key: "h2h_3_way", name: "Home / Draw / Away", endpoint: "event" },
+  { key: "h2h_lay", name: "Lay Match Winner", endpoint: "event" },
+  { key: "draw_no_bet", name: "Draw No Bet", endpoint: "event" },
+  { key: "double_chance", name: "Double Chance", endpoint: "event" },
+  { key: "double_chance_h1", name: "First-Half Double Chance", endpoint: "event" },
+  { key: "to_qualify", name: "To Qualify", endpoint: "event" },
+  { key: "halftime_fulltime", name: "Half Time / Full Time", endpoint: "event" },
+  { key: "totals", name: "Over / Under Goals", endpoint: "featured" },
+  { key: "alternate_totals", name: "Alternative Goal Totals", endpoint: "event" },
+  { key: "team_totals", name: "Team Total Goals", endpoint: "event" },
+  { key: "alternate_team_totals", name: "Alternative Team Totals", endpoint: "event" },
+  { key: "btts", name: "Both Teams to Score", endpoint: "event" },
+  { key: "btts_h1", name: "First-Half Both Teams to Score", endpoint: "event" },
+  { key: "correct_score", name: "Correct Score", endpoint: "event" },
+  { key: "correct_score_h1", name: "First-Half Correct Score", endpoint: "event" },
+  { key: "spreads", name: "Asian Handicap / Spreads", endpoint: "featured" },
+  { key: "alternate_spreads", name: "Alternative Handicaps", endpoint: "event" },
+  { key: "alternate_spreads_corners", name: "Corner Handicap", endpoint: "event" },
+  { key: "alternate_totals_corners", name: "Total Corners", endpoint: "event" },
+  { key: "alternate_team_totals_corners", name: "Team Total Corners", endpoint: "event" },
+  { key: "corners_1x2", name: "Corner Result", endpoint: "event" },
+  { key: "alternate_spreads_cards", name: "Card Handicap", endpoint: "event" },
+  { key: "alternate_totals_cards", name: "Total Cards", endpoint: "event" },
+  { key: "player_shots", name: "Player Shots", endpoint: "event" },
+  { key: "player_shots_alternate", name: "Alternative Player Shots", endpoint: "event" },
+  { key: "player_shots_on_target", name: "Player Shots on Target", endpoint: "event" },
+  { key: "player_shots_on_target_alternate", name: "Alternative Shots on Target", endpoint: "event" },
+  { key: "player_to_receive_card", name: "Player to Receive a Card", endpoint: "event" },
+  { key: "player_to_receive_red_card", name: "Player to Receive a Red Card", endpoint: "event" }
+];
 
-  return labels[key] || key.replace(/_/g, " ");
+function marketLabel(key) {
+  const item = MARKET_CATALOG.find(m => m.key === key);
+  return item ? item.name : String(key || "").replace(/_/g, " ");
 }
+
+/* -------------------------------------------------------
+   ODDS NORMALIZATION
+------------------------------------------------------- */
 
 function getBestMarkets(event) {
   const collected = {};
@@ -285,7 +323,6 @@ function getBestMarkets(event) {
 
         const previous = existing.get(identity);
 
-        // Keep the highest valid price found for each outcome.
         if (!previous || price > previous.price) {
           existing.set(identity, {
             name: outcome.name,
@@ -343,8 +380,6 @@ function normalizeEvent(event) {
     kickoff: event.commence_time,
     commence_time: event.commence_time,
     status: event.completed ? "FINISHED" : "TIMED",
-
-    // Compatibility with the existing frontend.
     odds: {
       home: homeOdds,
       draw: drawOdds,
@@ -353,15 +388,13 @@ function normalizeEvent(event) {
     home_odds: homeOdds,
     draw_odds: drawOdds,
     away_odds: awayOdds,
-
-    // Full markets and prices actually returned by the provider.
     markets,
     market_list: marketArray
   };
 }
 
 /* -------------------------------------------------------
-   API ROUTES
+   COMMON API ROUTES
 ------------------------------------------------------- */
 
 app.get("/", (req, res) => {
@@ -377,8 +410,11 @@ app.get("/", (req, res) => {
       "/api/competitions",
       "/api/odds/sports",
       "/api/odds?sport=soccer_epl",
+      "/api/markets/catalog",
+      "/api/markets?sport=soccer_epl&eventId=EVENT_ID",
+      "/api/event-odds?sport=soccer_epl&eventId=EVENT_ID&markets=h2h,totals",
       "/api/fixtures",
-      "/api/scores",
+      "/api/scores?sport=soccer_epl",
       "/api/score-predictions",
       "/api/leaderboard"
     ]
@@ -393,31 +429,190 @@ app.get("/api/health", (req, res) => {
     timezone: TZ,
     predictionDate: todayNigeria(),
     oddsConfigured: Boolean(ODDS_API_KEY),
-    supabaseConfigured: Boolean(
-      SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY
-    )
+    supabaseConfigured: Boolean(SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY)
   });
 });
 
-app.get("/api/diagnostic", async (req, res) => {
+app.get("/api/diagnostic", (req, res) => {
   res.json({
     success: true,
     provider: "The Odds API",
     timezone: TZ,
     predictionDate: todayNigeria(),
     oddsApiKeyConfigured: Boolean(ODDS_API_KEY),
-    supabaseConfigured: Boolean(
-      SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY
-    ),
+    supabaseConfigured: Boolean(SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY),
     scoringSecretConfigured: Boolean(SCORING_SECRET)
   });
 });
 
+/* -------------------------------------------------------
+   MARKET ENDPOINTS
+------------------------------------------------------- */
+
+// Reference catalogue only; actual availability must be checked per event.
+app.get("/api/markets/catalog", (req, res) => {
+  res.json({
+    success: true,
+    provider: "The Odds API",
+    count: MARKET_CATALOG.length,
+    note: "Reference catalogue only. Actual market availability depends on sport, event and bookmaker.",
+    markets: MARKET_CATALOG
+  });
+});
+
+// Discover the markets recently observed for one event.
+app.get("/api/markets", async (req, res) => {
+  try {
+    const sport = String(req.query.sport || "").trim();
+    const eventId = String(req.query.eventId || req.query.event_id || "").trim();
+    const regions = String(req.query.regions || "uk").trim();
+
+    if (!sport || !eventId) {
+      return sendError(
+        res,
+        400,
+        "Required: sport and eventId. Example: /api/markets?sport=soccer_epl&eventId=EVENT_ID"
+      );
+    }
+
+    const result = await oddsRequest(
+      `/sports/${encodeURIComponent(sport)}/events/${encodeURIComponent(eventId)}/markets`,
+      { regions }
+    );
+
+    const data = result.data || {};
+    const bookmakers = Array.isArray(data.bookmakers) ? data.bookmakers : [];
+    const unique = new Map();
+
+    for (const bookmaker of bookmakers) {
+      for (const market of bookmaker.markets || []) {
+        if (!unique.has(market.key)) {
+          unique.set(market.key, {
+            key: market.key,
+            name: marketLabel(market.key),
+            bookmakers: []
+          });
+        }
+
+        const item = unique.get(market.key);
+        const bookmakerName = bookmaker.title || bookmaker.key;
+
+        if (!item.bookmakers.includes(bookmakerName)) {
+          item.bookmakers.push(bookmakerName);
+        }
+      }
+    }
+
+    res.json({
+      success: true,
+      provider: "The Odds API",
+      sport,
+      eventId,
+      event: {
+        id: data.id || eventId,
+        home_team: data.home_team || null,
+        away_team: data.away_team || null,
+        commence_time: data.commence_time || null
+      },
+      regions,
+      count: unique.size,
+      markets: Array.from(unique.values()),
+      requestsRemaining: result.remaining,
+      requestsUsed: result.used
+    });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+// Fetch prices for selected event-specific markets.
+app.get("/api/event-odds", async (req, res) => {
+  try {
+    const sport = String(req.query.sport || "").trim();
+    const eventId = String(req.query.eventId || req.query.event_id || "").trim();
+    const regions = String(req.query.regions || "uk").trim();
+    const markets = String(req.query.markets || "")
+      .split(",")
+      .map(s => s.trim())
+      .filter(Boolean);
+
+    if (!sport || !eventId || markets.length === 0) {
+      return sendError(
+        res,
+        400,
+        "Required: sport, eventId and markets. Example: /api/event-odds?sport=soccer_epl&eventId=EVENT_ID&markets=btts,double_chance"
+      );
+    }
+
+    if (markets.length > 10) {
+      return sendError(
+        res,
+        400,
+        "Request up to 10 market keys at a time. Split larger requests into batches."
+      );
+    }
+
+    const result = await oddsRequest(
+      `/sports/${encodeURIComponent(sport)}/events/${encodeURIComponent(eventId)}/odds`,
+      {
+        regions,
+        markets: markets.join(","),
+        oddsFormat: "decimal",
+        dateFormat: "iso"
+      }
+    );
+
+    const data = result.data || {};
+    const bookmakers = (data.bookmakers || []).map(bookmaker => ({
+      key: bookmaker.key,
+      title: bookmaker.title,
+      last_update: bookmaker.last_update,
+      markets: (bookmaker.markets || []).map(market => ({
+        key: market.key,
+        name: marketLabel(market.key),
+        last_update: market.last_update,
+        outcomes: (market.outcomes || []).map(outcome => ({
+          name: outcome.name,
+          price: safeNumber(outcome.price),
+          ...(outcome.point !== undefined ? { point: outcome.point } : {}),
+          ...(outcome.description ? { description: outcome.description } : {})
+        }))
+      }))
+    }));
+
+    res.json({
+      success: true,
+      provider: "The Odds API",
+      sport,
+      eventId,
+      event: {
+        id: data.id || eventId,
+        home_team: data.home_team || null,
+        away_team: data.away_team || null,
+        commence_time: data.commence_time || null
+      },
+      requestedMarkets: markets,
+      regions,
+      bookmakers,
+      availableMarketKeys: Array.from(new Set(
+        bookmakers.flatMap(b => b.markets.map(m => m.key))
+      )),
+      requestsRemaining: result.remaining,
+      requestsUsed: result.used,
+      requestsLast: result.last
+    });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+/* -------------------------------------------------------
+   SPORTS AND COMPETITIONS
+------------------------------------------------------- */
+
 app.get("/api/odds/sports", async (req, res) => {
   try {
-    const result = await oddsRequest("/sports", {
-      all: "false"
-    });
+    const result = await oddsRequest("/sports", { all: "false" });
 
     const sports = (result.data || [])
       .filter(sport => sport.active !== false)
@@ -437,15 +632,13 @@ app.get("/api/odds/sports", async (req, res) => {
       requestsRemaining: result.remaining
     });
   } catch (error) {
-    sendError(res, error.status || 502, error.message);
+    sendApiError(res, error);
   }
 });
 
 app.get("/api/competitions", async (req, res) => {
   try {
-    const result = await oddsRequest("/sports", {
-      all: "false"
-    });
+    const result = await oddsRequest("/sports", { all: "false" });
 
     const competitions = (result.data || [])
       .filter(sport =>
@@ -464,19 +657,21 @@ app.get("/api/competitions", async (req, res) => {
       success: true,
       provider: "The Odds API",
       competitionsReturned: competitions.length,
-      competitions
+      competitions,
+      requestsRemaining: result.remaining
     });
   } catch (error) {
-    sendError(res, error.status || 502, error.message);
+    sendApiError(res, error);
   }
 });
 
-/*
- * Fetch odds from the actual odds endpoint.
- * This is NOT the scores endpoint.
- *
- * Supported markets depend on the competition and provider coverage.
- */
+/* -------------------------------------------------------
+   STANDARD ODDS ENDPOINT
+
+   Featured-market endpoint: do not request event-specific
+   markets such as btts here.
+------------------------------------------------------- */
+
 app.get("/api/odds", async (req, res) => {
   try {
     const sport = String(req.query.sport || "").trim();
@@ -490,20 +685,29 @@ app.get("/api/odds", async (req, res) => {
     }
 
     const regions = String(req.query.regions || "uk").trim();
-
-    const requestedMarkets = String(
-      req.query.markets || "h2h,totals,btts,spreads"
-    )
+    const requestedMarkets = String(req.query.markets || "h2h,totals,spreads")
       .split(",")
       .map(s => s.trim())
-      .filter(Boolean)
-      .join(",");
+      .filter(Boolean);
+
+    const eventSpecific = requestedMarkets.filter(key =>
+      MARKET_CATALOG.some(m => m.key === key && m.endpoint === "event")
+    );
+
+    if (eventSpecific.length) {
+      return sendError(
+        res,
+        400,
+        "The standard odds endpoint does not support some requested markets. Use /api/event-odds for event-specific markets.",
+        { eventSpecificMarkets: eventSpecific }
+      );
+    }
 
     const result = await oddsRequest(
       `/sports/${encodeURIComponent(sport)}/odds`,
       {
         regions,
-        markets: requestedMarkets,
+        markets: requestedMarkets.join(","),
         oddsFormat: "decimal",
         dateFormat: "iso"
       }
@@ -522,19 +726,19 @@ app.get("/api/odds", async (req, res) => {
       requestsUsed: result.used
     });
   } catch (error) {
-    sendError(res, error.status || 502, error.message);
+    sendApiError(res, error);
   }
 });
 
-/*
- * Prediction Challenge fixtures:
- * only future matches scheduled for today's date in Nigeria.
- */
+/* -------------------------------------------------------
+   PREDICTION CHALLENGE FIXTURES
+
+   Upcoming matches scheduled for today in Nigeria time.
+------------------------------------------------------- */
+
 app.get("/api/fixtures", async (req, res) => {
   try {
-    const sportsResult = await oddsRequest("/sports", {
-      all: "false"
-    });
+    const sportsResult = await oddsRequest("/sports", { all: "false" });
 
     const sports = (sportsResult.data || []).filter(s =>
       s.active !== false &&
@@ -584,17 +788,14 @@ app.get("/api/fixtures", async (req, res) => {
       .filter(match => {
         const kickoff = new Date(match.kickoff).getTime();
 
-        return (
-          Number.isFinite(kickoff) &&
+        return Number.isFinite(kickoff) &&
           kickoff > now &&
-          isTodayNigeria(match.kickoff)
-        );
+          isTodayNigeria(match.kickoff);
       })
       .sort((a, b) =>
         new Date(a.kickoff) - new Date(b.kickoff)
       );
 
-    // Remove duplicate events if a provider response repeats an event.
     const unique = [];
     const seen = new Set();
 
@@ -614,14 +815,14 @@ app.get("/api/fixtures", async (req, res) => {
       errors
     });
   } catch (error) {
-    sendError(res, error.status || 502, error.message);
+    sendApiError(res, error);
   }
 });
 
-/*
- * Scores route:
- * can be called with ?sport=soccer_epl
- */
+/* -------------------------------------------------------
+   SCORES
+------------------------------------------------------- */
+
 app.get("/api/scores", async (req, res) => {
   try {
     const sport = String(req.query.sport || "").trim();
@@ -651,7 +852,7 @@ app.get("/api/scores", async (req, res) => {
       requestsRemaining: result.remaining
     });
   } catch (error) {
-    sendError(res, error.status || 502, error.message);
+    sendApiError(res, error);
   }
 });
 
@@ -694,9 +895,9 @@ function normalizeH2HSelection(selection, homeName, awayName) {
 }
 
 /*
- * Returns true, false, or null.
- * null means this backend cannot safely settle this market/selection.
- */
+  Returns true, false, or null.
+  null means this backend cannot safely settle the selection.
+*/
 function settlePick(pick, event) {
   if (!event || event.completed !== true) return null;
 
@@ -708,7 +909,6 @@ function settlePick(pick, event) {
 
   const market = getMarketKey(pick);
   const selection = getSelection(pick);
-
   const { home, away } = score;
 
   if (market === "h2h" || market === "h2h_3_way") {
@@ -727,7 +927,6 @@ function settlePick(pick, event) {
   if (market === "totals") {
     const s = normalizeText(selection);
     const total = home + away;
-
     const match = s.match(/^(over|under)\s*(\d+(?:\.\d+)?)$/);
 
     if (!match) return null;
@@ -740,7 +939,6 @@ function settlePick(pick, event) {
 
   if (market === "btts") {
     const s = normalizeText(selection);
-
     const yes = ["yes", "btts yes", "both teams to score yes"];
     const no = ["no", "btts no", "both teams to score no"];
 
@@ -750,13 +948,16 @@ function settlePick(pick, event) {
     return null;
   }
 
-  // Other markets are deliberately not graded with guessed rules.
+  // Never grade unsupported markets using guessed rules.
   return null;
 }
 
 function calculateTicket(picks, scoreEvents) {
   if (!Array.isArray(picks) || picks.length === 0) {
-    return { state: "unresolved", reason: "Ticket has no selections." };
+    return {
+      state: "unresolved",
+      reason: "Ticket has no selections."
+    };
   }
 
   let totalPoints = 0;
@@ -800,8 +1001,6 @@ function calculateTicket(picks, scoreEvents) {
       const odds = getSavedOdds(pick);
 
       if (odds === null) {
-        // The result is known, but the required odds snapshot is missing.
-        // Do not invent points for a legacy selection.
         allSettled = false;
         pick.settlement_note =
           "Final result found, but saved decimal odds are missing.";
@@ -854,12 +1053,10 @@ function scoringAuthorized(req) {
   return supplied === SCORING_SECRET;
 }
 
-/*
- * This endpoint should be called by your trusted scheduler.
- *
- * It uses exact Odds API event IDs. Old tickets without those IDs
- * are left pending rather than matched by approximate team names.
- */
+/* -------------------------------------------------------
+   PREDICTION SCORING
+------------------------------------------------------- */
+
 app.post("/api/score-predictions", async (req, res) => {
   if (!scoringAuthorized(req)) {
     return sendError(res, 401, "Unauthorized scoring request.");
@@ -934,11 +1131,6 @@ app.post("/api/score-predictions", async (req, res) => {
 
       const points = outcome.points || 0;
 
-      /*
-       * Critical duplicate protection:
-       * update only while the row is still pending.
-       * Both columns receive the same final points value.
-       */
       const updated = await supabaseRequest(
         `${TABLE}?id=eq.${encodeURIComponent(entry.id)}&status=eq.pending`,
         {
@@ -947,7 +1139,7 @@ app.post("/api/score-predictions", async (req, res) => {
           body: {
             picks: outcome.picks,
             point: points,
-            points: points,
+            points,
             status: "graded"
           }
         }
@@ -957,7 +1149,6 @@ app.post("/api/score-predictions", async (req, res) => {
         graded++;
         pointsAwarded += points;
       } else {
-        // Another scoring run may already have processed this ticket.
         skipped++;
       }
     }
@@ -1009,7 +1200,6 @@ app.get("/api/leaderboard", async (req, res) => {
 
       existing.points += points;
       existing.tickets += 1;
-
       totals.set(userId, existing);
     }
 
@@ -1042,6 +1232,6 @@ app.get("/api/leaderboard", async (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`FootStats backend running on port ${PORT}`);
-  console.log(`Provider: The Odds API`);
+  console.log("Provider: The Odds API");
   console.log(`Nigeria prediction date: ${todayNigeria()}`);
 }); 
