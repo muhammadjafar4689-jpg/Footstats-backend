@@ -19,23 +19,100 @@ const TABLE = "prediction_entries";
 const TZ = "Africa/Lagos";
 const POINTS_MULTIPLIER = 100;
 
-const FIXTURES_CACHE_MS = 60 * 1000;
 const FIXTURES_CONCURRENCY = 5;
 
-let fixturesCache = {
-  date: "",
-  expiresAt: 0,
-  data: null
-};
+/* -------------------------------------------------------
+   DATE HELPERS (Nigeria time)
+------------------------------------------------------- */
+
+function todayNigeria() {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: TZ,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(new Date());
+
+  const p = {};
+
+  for (const item of parts) {
+    if (item.type !== "literal") {
+      p[item.type] = item.value;
+    }
+  }
+
+  return `${p.year}-${p.month}-${p.day}`;
+}
+
+function dateInNigeria(value) {
+  if (!value) return "";
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) return "";
+
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: TZ,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(date);
+
+  const p = {};
+
+  for (const item of parts) {
+    if (item.type !== "literal") {
+      p[item.type] = item.value;
+    }
+  }
+
+  return `${p.year}-${p.month}-${p.day}`;
+}
+
+function isValidDateKey(value) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) &&
+    !Number.isNaN(new Date(`${value}T00:00:00+01:00`).getTime());
+}
+
+function shiftNigeriaDate(dateStr, days) {
+  const d = new Date(`${dateStr}T12:00:00+01:00`);
+  d.setUTCDate(d.getUTCDate() + days);
+
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: TZ,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(d);
+
+  const p = {};
+
+  for (const item of parts) {
+    if (item.type !== "literal") {
+      p[item.type] = item.value;
+    }
+  }
+
+  return `${p.year}-${p.month}-${p.day}`;
+}
+
+function nigeriaBoundsForDate(dateStr) {
+  const start = new Date(`${dateStr}T00:00:00+01:00`);
+
+  return {
+    from: start.toISOString(),
+    to: new Date(start.getTime() + 24 * 60 * 60 * 1000).toISOString()
+  };
+}
 
 /* -------------------------------------------------------
    50 COMPETITIONS
 
-   These are the competition keys returned by your
-   /api/competitions endpoint.
+   Reference list only. Returned by /api/competitions.
+   Costs ZERO API requests.
 
-   The Odds API can change availability by season.
-   A listed competition may temporarily have no fixtures.
+   Fixtures are only FETCHED for ACTIVE_COMPETITIONS
+   (see the fixtures section below) to protect quota.
 ------------------------------------------------------- */
 
 const COMPETITIONS = [
@@ -94,67 +171,6 @@ const COMPETITIONS = [
 /* -------------------------------------------------------
    BASIC HELPERS
 ------------------------------------------------------- */
-
-function todayNigeria() {
-  const parts = new Intl.DateTimeFormat("en-GB", {
-    timeZone: TZ,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit"
-  }).formatToParts(new Date());
-
-  const p = {};
-
-  for (const item of parts) {
-    if (item.type !== "literal") {
-      p[item.type] = item.value;
-    }
-  }
-
-  return `${p.year}-${p.month}-${p.day}`;
-}
-
-function dateInNigeria(value) {
-  if (!value) return "";
-
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) return "";
-
-  const parts = new Intl.DateTimeFormat("en-GB", {
-    timeZone: TZ,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit"
-  }).formatToParts(date);
-
-  const p = {};
-
-  for (const item of parts) {
-    if (item.type !== "literal") {
-      p[item.type] = item.value;
-    }
-  }
-
-  return `${p.year}-${p.month}-${p.day}`;
-}
-
-function isTodayNigeria(value) {
-  return dateInNigeria(value) === todayNigeria();
-}
-
-function getNigeriaDayBounds() {
-  const date = todayNigeria();
-
-  const start = new Date(`${date}T00:00:00+01:00`);
-  const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
-
-  return {
-    date,
-    from: start.toISOString(),
-    to: end.toISOString()
-  };
-}
 
 function sendError(res, status, message, extra = {}) {
   return res.status(status).json({
@@ -522,7 +538,7 @@ app.get("/", (req, res) => {
       "/api/markets?sport=soccer_epl&eventId=EVENT_ID",
       "/api/event-odds?sport=soccer_epl&eventId=EVENT_ID&markets=h2h,totals",
       "/api/fixtures",
-      "/api/fixtures?limit=5",
+      "/api/fixtures?date=YYYY-MM-DD",
       "/api/scores?sport=soccer_epl",
       "/api/score-predictions",
       "/api/leaderboard"
@@ -538,6 +554,7 @@ app.get("/api/health", (req, res) => {
     timezone: TZ,
     predictionDate: todayNigeria(),
     competitionsConfigured: COMPETITIONS.length,
+    activeCompetitions: ACTIVE_COMPETITIONS.length,
     oddsConfigured: Boolean(ODDS_API_KEY),
     supabaseConfigured: Boolean(
       SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY
@@ -552,6 +569,7 @@ app.get("/api/diagnostic", (req, res) => {
     timezone: TZ,
     predictionDate: todayNigeria(),
     competitionsConfigured: COMPETITIONS.length,
+    activeCompetitions: ACTIVE_COMPETITIONS.length,
     oddsApiKeyConfigured: Boolean(ODDS_API_KEY),
     supabaseConfigured: Boolean(
       SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY
@@ -746,39 +764,45 @@ app.get("/api/event-odds", async (req, res) => {
 });
 
 /* -------------------------------------------------------
-   SPORTS AND COMPETITIONS
+   SPORTS / COMPETITIONS
+
+   /api/odds/sports is STATIC (zero API credits) and only
+   lists the competitions we actually serve fixtures for.
+   Keep the frontend dropdown and the fetchable list in
+   sync automatically.
 ------------------------------------------------------- */
 
-app.get("/api/odds/sports", async (req, res) => {
-  try {
-    const result = await oddsRequest("/sports", { all: "false" });
+const ACTIVE_COMPETITIONS = [
+  { key: "soccer_epl", name: "EPL" },
+  { key: "soccer_spain_la_liga", name: "La Liga - Spain" },
+  { key: "soccer_italy_serie_a", name: "Serie A - Italy" },
+  { key: "soccer_germany_bundesliga", name: "Bundesliga - Germany" },
+  { key: "soccer_france_ligue_one", name: "Ligue 1 - France" },
+  { key: "soccer_uefa_champs_league", name: "UEFA Champions League" }
+];
 
-    const sports = (result.data || [])
-      .filter(sport => sport.active !== false)
-      .map(sport => ({
-        key: sport.key,
-        title: sport.title,
-        group: sport.group,
-        description: sport.description,
-        active: sport.active
-      }));
+const TODAY_CACHE_REFRESH_MS = 12 * 60 * 60 * 1000;
+const FUTURE_CACHE_REFRESH_MS = 48 * 60 * 60 * 1000;
+const MAX_FUTURE_DAYS = 13;
 
-    res.json({
-      success: true,
-      provider: "The Odds API",
-      sports,
-      count: sports.length,
-      requestsRemaining: result.remaining
-    });
-  } catch (error) {
-    sendApiError(res, error);
-  }
+app.get("/api/odds/sports", (req, res) => {
+  res.json({
+    success: true,
+    provider: "The Odds API",
+    sports: ACTIVE_COMPETITIONS.map(sport => ({
+      key: sport.key,
+      title: sport.name,
+      group: "Soccer",
+      description: sport.name,
+      active: true
+    })),
+    count: ACTIVE_COMPETITIONS.length
+  });
 });
 
 /*
-  This route uses the saved 50-competition list.
-  It does not call The Odds API and therefore does
-  not consume an API request.
+  Reference list of all 50 competitions on your plan.
+  Does not call The Odds API and costs zero requests.
 */
 app.get("/api/competitions", (req, res) => {
   res.json({
@@ -863,10 +887,25 @@ app.get("/api/odds", async (req, res) => {
 });
 
 /* -------------------------------------------------------
-   FIXTURE FETCHING HELPERS
+   FIXTURES — THE DATE ENGINE
+
+   /api/fixtures?date=YYYY-MM-DD
+
+   The frontend controls which day is displayed. We serve
+   exactly that Nigeria-calendar date.
+
+   First request for a date: fetch from The Odds API for
+   ACTIVE_COMPETITIONS and store in Supabase (fixtures_cache
+   table). Later requests for the same date: served from
+   Supabase at ZERO API cost.
+
+   Refresh policy: "today" re-fetches if cache is older than
+   12h; future dates re-fetch if older than 48h. Point your
+   cron at /api/fixtures (no date) once a day at ~05:00
+   Nigeria time to pre-warm today.
 ------------------------------------------------------- */
 
-async function fetchCompetitionFixtures(sport, bounds) {
+async function fetchCompetitionFixturesForRange(sport, bounds) {
   const result = await oddsRequest(
     `/sports/${encodeURIComponent(sport.key)}/odds`,
     {
@@ -886,12 +925,7 @@ async function fetchCompetitionFixtures(sport, bounds) {
       league: sport.name,
       sport_title: sport.name,
       sport_key: sport.key
-    })),
-    quota: {
-      remaining: result.remaining,
-      used: result.used,
-      last: result.last
-    }
+    }))
   };
 }
 
@@ -931,151 +965,137 @@ async function mapWithConcurrency(items, concurrency, worker) {
   return results;
 }
 
-/* -------------------------------------------------------
-   PREDICTION CHALLENGE FIXTURES
-
-   Default: all 50 configured competitions.
-
-   ?limit=5 limits a test to the first five competitions.
-
-   Fixtures are filtered by Nigeria's calendar day.
-   We deliberately do not remove an event merely because
-   its kickoff time has passed.
-
-   Results are cached for 60 seconds per Nigeria date.
-------------------------------------------------------- */
-
 app.get("/api/fixtures", async (req, res) => {
   try {
-    const bounds = getNigeriaDayBounds();
+    const requested = String(req.query.date || "").trim();
+    const date = isValidDateKey(requested) ? requested : todayNigeria();
 
-    const requestedLimit = parseInt(req.query.limit || "50", 10);
+    const today = todayNigeria();
 
-    const limit = Math.min(
-      Math.max(
-        Number.isFinite(requestedLimit) ? requestedLimit : 50,
-        1
-      ),
-      COMPETITIONS.length
-    );
-
-    const selectedSports = COMPETITIONS.slice(0, limit);
-
-    const cacheKey = `${bounds.date}|${limit}`;
-
-    if (
-      fixturesCache.data &&
-      fixturesCache.date === cacheKey &&
-      Date.now() < fixturesCache.expiresAt
-    ) {
-      return res.json({
-        ...fixturesCache.data,
-        cached: true
-      });
+    if (date < today || date > shiftNigeriaDate(today, MAX_FUTURE_DAYS)) {
+      return sendError(
+        res,
+        400,
+        `Date must be between ${today} and ${shiftNigeriaDate(today, MAX_FUTURE_DAYS)} (Nigeria time).`
+      );
     }
 
-    const results = await mapWithConcurrency(
-      selectedSports,
-      FIXTURES_CONCURRENCY,
-      sport => fetchCompetitionFixtures(sport, bounds)
+    const refreshMs = date === today
+      ? TODAY_CACHE_REFRESH_MS
+      : FUTURE_CACHE_REFRESH_MS;
+
+    let rows = await supabaseRequest(
+      `fixtures_cache?fixture_date=eq.${date}&select=event_id,sport_key,payload,fetched_at`,
+      { method: "GET" }
     );
 
-    const matches = [];
-    const errors = [];
-    const successfulCompetitions = [];
-    const quotaReports = [];
+    let freshEnough = false;
 
-    for (let i = 0; i < results.length; i++) {
-      const result = results[i];
-      const sport = selectedSports[i];
-
-      if (result.status === "fulfilled") {
-        successfulCompetitions.push({
-          key: sport.key,
-          name: sport.name,
-          matchesReturned: result.value.matches.length
-        });
-
-        matches.push(...result.value.matches);
-
-        quotaReports.push({
-          competition: sport.key,
-          ...result.value.quota
-        });
-      } else {
-        errors.push({
-          competition: sport.key,
-          name: sport.name,
-          error: result.reason?.message || "Request failed",
-          status: result.reason?.status || null,
-          ...(result.reason?.quota
-            ? { quota: result.reason.quota }
-            : {})
-        });
-      }
-    }
-
-    /*
-      Keep only events whose kickoff falls on today's
-      Nigeria calendar date. Do not check kickoff > now:
-      a match may already have started and still be returned
-      by the provider.
-    */
-    const todaysMatches = matches
-      .filter(match =>
-        match.event_id &&
-        match.kickoff &&
-        isTodayNigeria(match.kickoff)
-      )
-      .sort((a, b) =>
-        new Date(a.kickoff).getTime() -
-        new Date(b.kickoff).getTime()
+    if (Array.isArray(rows) && rows.length) {
+      const oldest = Math.min(
+        ...rows.map(r => new Date(r.fetched_at).getTime())
       );
 
-    /*
-      Deduplicate events by Odds API event ID.
-    */
-    const unique = [];
-    const seen = new Set();
-
-    for (const match of todaysMatches) {
-      const id = String(match.event_id);
-
-      if (seen.has(id)) continue;
-
-      seen.add(id);
-      unique.push(match);
+      freshEnough = (Date.now() - oldest) < refreshMs;
     }
 
-    const payload = {
+    const fetchErrors = [];
+
+    if (!freshEnough) {
+      const bounds = nigeriaBoundsForDate(date);
+
+      const results = await mapWithConcurrency(
+        ACTIVE_COMPETITIONS,
+        FIXTURES_CONCURRENCY,
+        sport => fetchCompetitionFixturesForRange(sport, bounds)
+      );
+
+      const fetched = [];
+
+      for (let i = 0; i < results.length; i++) {
+        if (results[i].status === "fulfilled") {
+          fetched.push(...results[i].value.matches);
+        } else {
+          fetchErrors.push({
+            competition: ACTIVE_COMPETITIONS[i].key,
+            error: results[i].reason?.message || "Request failed"
+          });
+        }
+      }
+
+      const forDate = fetched.filter(m =>
+        m.event_id &&
+        m.kickoff &&
+        dateInNigeria(m.kickoff) === date
+      );
+
+      const seen = new Set();
+      const unique = [];
+
+      for (const m of forDate) {
+        const k = `${m.sport_key}|${m.event_id}`;
+
+        if (seen.has(k)) continue;
+
+        seen.add(k);
+        unique.push(m);
+      }
+
+      if (unique.length) {
+        await supabaseRequest(
+          `fixtures_cache?on_conflict=event_id,sport_key`,
+          {
+            method: "POST",
+            prefer: "resolution=merge-duplicates,return=minimal",
+            body: unique.map(m => ({
+              event_id: m.event_id,
+              sport_key: m.sport_key,
+              fixture_date: date,
+              fetched_at: new Date().toISOString(),
+              payload: { ...m, fixture_date: date }
+            }))
+          }
+        );
+      }
+
+      // prune fixtures older than 3 days
+      await supabaseRequest(
+        `fixtures_cache?fixture_date=lt.${shiftNigeriaDate(today, -3)}`,
+        { method: "DELETE", prefer: "return=minimal" }
+      ).catch(() => {});
+
+      rows = await supabaseRequest(
+        `fixtures_cache?fixture_date=eq.${date}&select=event_id,sport_key,payload,fetched_at`,
+        { method: "GET" }
+      );
+    }
+
+    const seen = new Set();
+    const matches = [];
+
+    for (const r of (Array.isArray(rows) ? rows : [])) {
+      const k = `${r.sport_key}|${r.event_id}`;
+
+      if (seen.has(k)) continue;
+
+      seen.add(k);
+      matches.push(r.payload);
+    }
+
+    matches.sort((a, b) =>
+      new Date(a.kickoff).getTime() - new Date(b.kickoff).getTime()
+    );
+
+    res.json({
       success: true,
       provider: "The Odds API",
       timezone: TZ,
-      date: bounds.date,
-
-      competitionsAvailable: COMPETITIONS.length,
-      competitionsRequested: selectedSports.length,
-      competitionsChecked: successfulCompetitions.length,
-      competitionsFailed: errors.length,
-
-      count: unique.length,
-      matches: unique,
-
-      successfulCompetitions,
-      errors,
-      quota: quotaReports,
-
-      cached: false,
-      cacheSeconds: FIXTURES_CACHE_MS / 1000
-    };
-
-    fixturesCache = {
-      date: cacheKey,
-      expiresAt: Date.now() + FIXTURES_CACHE_MS,
-      data: payload
-    };
-
-    res.json(payload);
+      date,
+      count: matches.length,
+      matches,
+      cached: freshEnough,
+      errors: fetchErrors
+    });
   } catch (error) {
     console.error("Fixtures error:", error);
     sendApiError(res, error);
@@ -1536,5 +1556,7 @@ app.listen(PORT, () => {
   console.log(`FootStats backend running on port ${PORT}`);
   console.log("Provider: The Odds API");
   console.log(`Competitions configured: ${COMPETITIONS.length}`);
+  console.log(`Active competitions (fixtures fetched): ${ACTIVE_COMPETITIONS.length}`);
   console.log(`Nigeria prediction date: ${todayNigeria()}`);
-}); 
+});
+ 
