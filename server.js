@@ -96,14 +96,19 @@ function shiftNigeriaDate(dateStr, days) {
   return `${p.year}-${p.month}-${p.day}`;
 }
 
+function toOddsApiTime(date) {
+  return date.toISOString().replace(/\.\d{3}Z$/, "Z");
+}
+
 function nigeriaBoundsForDate(dateStr) {
   const start = new Date(`${dateStr}T00:00:00+01:00`);
 
   return {
-    from: start.toISOString(),
-    to: new Date(start.getTime() + 24 * 60 * 60 * 1000).toISOString()
+    from: toOddsApiTime(start),
+    to: toOddsApiTime(new Date(start.getTime() + 24 * 60 * 60 * 1000))
   };
 }
+ 
 
 /* -------------------------------------------------------
    50 COMPETITIONS
