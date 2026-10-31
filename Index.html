@@ -80,9 +80,36 @@ footer{text-align:center;padding:25px;color:var(--muted);font-size:11px}
       <select id="competition"><option value="ALL">All available competitions</option></select>
       <label for="market">Betting market</label>
       <select id="market">
-        <!-- MVP: Match Result only. The backend only fetches h2h to protect quota.
-             Other markets return AFTER we fetch them server-side and fix settlement. -->
-        <option value="h2h">Match Result — Home / Draw / Away</option>
+        <option value="h2h">Match Winner (1X2)</option>
+        <option value="h2h_3_way">Three-Way Match Result</option>
+        <option value="double_chance">Double Chance</option>
+        <option value="double_chance_h1">Double Chance – First Half</option>
+        <option value="draw_no_bet">Draw No Bet</option>
+        <option value="spreads">Asian Handicap / Spreads</option>
+        <option value="alternate_spreads">Alternative Handicap</option>
+        <option value="totals">Over/Under Goals</option>
+        <option value="alternate_totals">Alternative Over/Under</option>
+        <option value="btts">Both Teams to Score</option>
+        <option value="btts_h1">Both Teams to Score – First Half</option>
+        <option value="btts_h2">Both Teams to Score – Second Half</option>
+        <option value="correct_score">Correct Score</option>
+        <option value="correct_score_h1">Correct Score – First Half</option>
+        <option value="halftime_fulltime">Half Time / Full Time</option>
+        <option value="h2h_3_way_h1">First Half Match Result</option>
+        <option value="h2h_3_way_h2">Second Half Match Result</option>
+        <option value="totals_h1">First Half Over/Under</option>
+        <option value="totals_h2">Second Half Over/Under</option>
+        <option value="team_totals">Team Goals Over/Under</option>
+        <option value="team_totals_h1">First Half Team Goals</option>
+        <option value="team_totals_h2">Second Half Team Goals</option>
+        <option value="alternate_totals_corners">Total Corners</option>
+        <option value="alternate_spreads_corners">Corner Handicap</option>
+        <option value="alternate_team_totals_corners">Team Total Corners</option>
+        <option value="corners_1x2">Most Corners (1X2)</option>
+        <option value="alternate_totals_cards">Total Cards</option>
+        <option value="alternate_spreads_cards">Card Handicap</option>
+        <option value="player_shots">Player Shots</option>
+        <option value="player_shots_on_target">Player Shots on Target</option>
       </select>
       <div class="row" style="margin-top:12px">
         <button class="btn primary" id="refresh">↻ Refresh matches</button>
