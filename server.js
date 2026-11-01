@@ -399,6 +399,8 @@ const MARKET_CATALOG = [
   { key: "player_shots_on_target", name: "Player Shots on Target", endpoint: "event" }
 ];
 
+const ALL_MARKET_KEYS = MARKET_CATALOG.map(m => m.key).join(",");
+
 function marketLabel(key) {
   const item = MARKET_CATALOG.find(m => m.key === key);
 
@@ -915,7 +917,7 @@ async function fetchCompetitionFixturesForRange(sport, bounds) {
     `/sports/${encodeURIComponent(sport.key)}/odds`,
     {
       regions: "uk",
-      markets: "h2h",
+      markets: ALL_MARKET_KEYS,
       oddsFormat: "decimal",
       dateFormat: "iso",
       commenceTimeFrom: bounds.from,
