@@ -21,7 +21,36 @@ function renderMatch(e){
     </div>
     ${Object.entries(markets).map(([key,m]) => `<div class="match-market">
         <div class="marketname">${escapeHTML(m?.market_name||({
-          h2h:"Match Result",totals:"Over / Under",btts:"Both Teams To Score",spreads:"Handicap"
+          h2h:"Match Winner (1X2)",
+          h2h_3_way:"Three-Way Match Result",
+          double_chance:"Double Chance",
+          double_chance_h1:"Double Chance – First Half",
+          draw_no_bet:"Draw No Bet",
+          spreads:"Asian Handicap / Spreads",
+          alternate_spreads:"Alternative Handicap",
+          totals:"Over/Under Goals",
+          alternate_totals:"Alternative Over/Under",
+          btts:"Both Teams to Score",
+          btts_h1:"Both Teams to Score – First Half",
+          btts_h2:"Both Teams to Score – Second Half",
+          correct_score:"Correct Score",
+          correct_score_h1:"Correct Score – First Half",
+          halftime_fulltime:"Half Time / Full Time",
+          h2h_3_way_h1:"First Half Match Result",
+          h2h_3_way_h2:"Second Half Match Result",
+          totals_h1:"First Half Over/Under",
+          totals_h2:"Second Half Over/Under",
+          team_totals:"Team Goals Over/Under",
+          team_totals_h1:"First Half Team Goals",
+          team_totals_h2:"Second Half Team Goals",
+          alternate_totals_corners:"Total Corners",
+          alternate_spreads_corners:"Corner Handicap",
+          alternate_team_totals_corners:"Team Total Corners",
+          corners_1x2:"Most Corners (1X2)",
+          alternate_totals_cards:"Total Cards",
+          alternate_spreads_cards:"Card Handicap",
+          player_shots:"Player Shots",
+          player_shots_on_target:"Player Shots on Target"
         }[key]||key))} (${escapeHTML(label)})</div>
         ${renderOddsForKey(e, key)}
       </div>`).join("")}
