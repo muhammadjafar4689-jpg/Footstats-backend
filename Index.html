@@ -1,8 +1,521 @@
-</button>`;
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FootStats Prediction Challenge</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+:root{--bg:#101218;--panel:#191d26;--card:#202631;--border:#303746;--text:#f4f6fb;--muted:#a5adbc;--accent:#31d17c}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:Arial,sans-serif}
+header{background:linear-gradient(120deg,#792b2b,#351d24);padding:20px 16px}
+.brand{font-size:23px;font-weight:900}.brand span{color:var(--accent)}
+.subtitle{font-size:11px;color:#e2d4d4;margin-top:5px;letter-spacing:1px}
+nav{display:flex;gap:8px;padding:12px;overflow-x:auto;background:#171a21;border-bottom:1px solid var(--border)}
+button,input,select{font:inherit}
+nav button,.btn{border:1px solid var(--border);background:var(--card);color:var(--text);border-radius:9px;padding:10px 13px;white-space:nowrap;cursor:pointer}
+nav button.active,.btn.primary{background:var(--accent);color:#082014;border-color:var(--accent);font-weight:bold}
+button:disabled{opacity:.45;cursor:not-allowed}
+main{max-width:900px;margin:auto;padding:14px}
+h1{font-size:22px;margin:8px 0}
+h2{font-size:17px;margin:20px 0 10px}
+.small{font-size:12px;color:var(--muted);line-height:1.5}
+.panel{background:var(--panel);border:1px solid var(--border);border-radius:13px;padding:14px;margin:12px 0}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+input,select{min-width:0;background:#11151c;color:white;border:1px solid var(--border);border-radius:8px;padding:11px;width:100%}
+label{display:block;font-size:12px;color:var(--muted);margin:10px 0 5px}
+#dates{display:flex;gap:7px;overflow-x:auto;padding:5px 1px 12px}
+.day{flex:0 0 78px;text-align:center;border:1px solid var(--border);background:var(--panel);color:var(--text);padding:11px 5px;border-radius:10px;cursor:pointer}
+.day strong,.day span{display:block}.day span{font-size:11px;color:var(--muted);margin-top:6px}
+.day.active{border-color:var(--accent);background:#173526}.day.active span{color:#a6f4c7}
+.match{background:var(--panel);border:1px solid var(--border);border-radius:13px;margin:11px 0;overflow:hidden}
+.matchtop{padding:12px 13px;background:linear-gradient(110deg,#242a35,#1a1f28);display:flex;justify-content:space-between;gap:8px}
+.league{font-size:11px;color:var(--muted)}.kickoff{font-size:12px;color:var(--accent);white-space:nowrap}
+.teams{display:grid;grid-template-columns:1fr auto 1fr;gap:8px;align-items:center;padding:16px 12px 12px;text-align:center}
+.team{font-size:13px;font-weight:bold;overflow-wrap:anywhere}.vs{font-size:11px;color:var(--muted)}
+.marketname{padding:0 12px 8px;font-size:11px;color:var(--muted)}
+.odds{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;padding:0 10px 12px}
+.odds button,.otheroutcomes button{min-width:0;padding:10px 3px;background:#111720;border:1px solid var(--border);border-radius:8px;color:var(--text);cursor:pointer;overflow-wrap:anywhere}
+.odds button strong,.otheroutcomes button strong{display:block;color:var(--accent);margin-top:5px}
+.odds button.selected,.otheroutcomes button.selected{background:#16452e;border-color:var(--accent)}
+.odds button:disabled,.otheroutcomes button:disabled{opacity:.4;cursor:not-allowed}
+.otheroutcomes{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;padding:0 10px 12px}
+.empty{padding:22px 10px;text-align:center;color:var(--muted);font-size:13px}
+.notice{padding:11px;border-radius:8px;background:#252a34;color:var(--muted);font-size:12px;line-height:1.5;margin:10px 0;overflow-wrap:anywhere}
+.error{color:#ff9292}.success{color:var(--accent)}
+.pick{padding:12px 0;border-bottom:1px solid var(--border)}.pick:last-child{border-bottom:0}
+.pickhead{display:flex;justify-content:space-between;gap:8px;font-size:13px}
+.pick button.remove{background:transparent;color:#ff9292;border:0;padding:4px}
+.point{font-size:12px;color:var(--accent)}
+.stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.stat{background:var(--card);padding:12px;border-radius:9px;text-align:center}
+.stat strong{font-size:19px;display:block;overflow-wrap:anywhere}.stat span{font-size:11px;color:var(--muted)}
+.cardcta{display:block;width:100%;margin:0;padding:11px;background:#173526;color:#a6f4c7;border:0;border-top:1px solid var(--border);cursor:pointer;font-weight:bold;font-size:12px;letter-spacing:.4px}
+.cardcta:hover{background:#1b4a30}
+.detailwrap{position:fixed;inset:0;background:rgba(6,8,12,.82);z-index:60;display:flex;justify-content:center;align-items:flex-start;overflow-y:auto;padding:16px 10px 42px}
+.detailpanel{background:var(--bg);border:1px solid var(--border);border-radius:14px;max-width:780px;width:100%;padding:14px}
+.detailhead{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}
+.detailteams{font-size:16px;font-weight:900;margin:4px 0}
+.detailmeta{font-size:11px;color:var(--muted)}
+.msection{margin:18px 0 6px;font-size:13px;font-weight:bold;color:var(--accent);letter-spacing:.5px;text-transform:uppercase}
+.mblock{border:1px solid var(--border);border-radius:11px;padding:10px;margin:9px 0;background:var(--panel)}
+.mblock h3{font-size:13px;margin:0 0 9px}
+.mgrid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
+.mgrid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px}
+.mgrid2 button,.mgrid3 button{min-width:0;padding:10px 3px;background:#111720;border:1px solid var(--border);border-radius:8px;color:var(--text);cursor:pointer;overflow-wrap:anywhere}
+.mgrid2 button strong,.mgrid3 button strong{display:block;color:var(--accent);margin-top:5px}
+.mgrid2 button.selected,.mgrid3 button.selected{background:#16452e;border-color:var(--accent)}
+.mgrid2 button:disabled,.mgrid3 button:disabled{opacity:.4;cursor:not-allowed}
+.unavail{font-size:12px;color:var(--muted);padding:6px 0;line-height:1.5}
+footer{text-align:center;padding:25px;color:var(--muted);font-size:11px}
+[hidden]{display:none!important}
+@media(min-width:650px){.matchgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.matchgrid .match{margin:0 0 10px}}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">FOOT<span>STATS</span> ⚽</div>
+  <div class="subtitle">PREDICTION CHALLENGE · FOOTBALL ODDS & ANALYTICS</div>
+</header>
+
+<nav>
+  <button class="active" data-page="matches">Matches</button>
+  <button data-page="slip">My Slip <span id="slipCount">0</span>/15</button>
+  <button data-page="leaderboard">Leaderboard</button>
+  <button data-page="account">Account</button>
+</nav>
+
+<main>
+  <section id="page-matches">
+    <h1>Prediction Challenge</h1>
+    <p class="small">Choose 15 different matches. Predictions close when each match kicks off. Times are shown in Nigeria time.</p>
+    <div id="dates"></div>
+
+    <div class="panel">
+      <label for="competition">Competition</label>
+      <select id="competition"><option value="ALL">All available competitions</option></select>
+      <label for="market">Betting market</label>
+      <select id="market">
+        <option value="h2h">Match Result — Home / Draw / Away</option>
+        <option value="totals">Over / Under</option>
+        <option value="btts">Both Teams To Score</option>
+        <option value="spreads">Handicap</option>
+      </select>
+      <div class="row" style="margin-top:12px">
+        <button class="btn primary" id="refresh">↻ Refresh matches</button>
+        <span id="matchCount" class="small"></span>
+      </div>
+      <div class="small" style="margin-top:8px">Tap “All 30 markets” on any match card to open every betting market for that match. Availability depends on your connected Odds API.</div>
+    </div>
+
+    <div id="message" class="notice">Connecting to FootStats...</div>
+    <div id="matches" class="matchgrid"></div>
+  </section>
+
+  <div id="detail" class="detailwrap" hidden>
+    <div class="detailpanel">
+      <div class="detailhead">
+        <div>
+          <div id="detailLeague" class="detailmeta"></div>
+          <div id="detailTeams" class="detailteams"></div>
+          <div id="detailMeta" class="detailmeta"></div>
+        </div>
+        <button class="btn detailclose" id="detailClose">✕ Close</button>
+      </div>
+      <div id="detailNotice" class="notice"></div>
+      <div id="detailBody"></div>
+    </div>
+  </div>
+
+  <section id="page-slip" hidden>
+    <h1>My Prediction Slip</h1>
+    <div class="notice">
+      Select exactly 15 different matches to submit. Each winning pick contributes
+      (decimal odds − 1) × 100 potential points. A losing pick makes the ticket score zero.
+      Actual points are calculated by your backend after results become available.
+    </div>
+    <div id="slip" class="panel"></div>
+    <div class="panel">
+      <div class="stats">
+        <div class="stat"><strong id="pickTotal">0/15</strong><span>Matches selected</span></div>
+        <div class="stat"><strong id="potentialPoints">0</strong><span>Potential points</span></div>
+        <div class="stat"><strong id="ticketStatus">Draft</strong><span>Ticket status</span></div>
+      </div>
+      <button class="btn primary" id="submitSlip" style="width:100%;margin-top:14px">Submit 15-match prediction</button>
+      <div id="slipMessage" class="notice">Sign in and select 15 different matches to submit.</div>
+    </div>
+  </section>
+
+  <section id="page-leaderboard" hidden>
+    <h1>Leaderboard</h1>
+    <p class="small">Points are calculated by the FootStats scoring backend.</p>
+    <button class="btn" id="refreshRanks">↻ Refresh leaderboard</button>
+    <div id="ranks" class="panel"><div class="empty">Open this page to load the leaderboard.</div></div>
+  </section>
+
+  <section id="page-account" hidden>
+    <h1>Account</h1>
+    <div class="panel">
+      <div id="accountState" class="notice">Checking login status...</div>
+      <div id="authForm">
+        <label for="email">Email address</label>
+        <input id="email" type="email" autocomplete="email" placeholder="you@example.com">
+        <label for="password">Password</label>
+        <input id="password" type="password" autocomplete="current-password" placeholder="At least 6 characters">
+        <div class="row" style="margin-top:12px">
+          <button class="btn primary" id="signIn">Sign in</button>
+          <button class="btn" id="signUp">Create account</button>
+        </div>
+      </div>
+      <button class="btn" id="signOut" hidden>Sign out</button>
+      <div id="authMessage" class="notice"></div>
+    </div>
+  </section>
+</main>
+<footer>FOOTSTATS · Football data and scoring provided by your connected backend.</footer>
+
+<script>
+"use strict";
+
+const API="https://footstats-backend-d4kc.onrender.com";
+const SUPABASE_URL="https://hjkjoqkkwaoysyazhanu.supabase.co";
+const SUPABASE_KEY="sb_publishable_3Nj_jPws61KzG108Oh9Q0w_Pox81pKW";
+const TZ="Africa/Lagos";
+const MAX_PICKS=15;
+const db=window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
+
+let user=null;
+let allEvents=[];
+let sports=[];
+let slip=[];
+let selectedDate=dateKey(new Date());
+let selectedCompetition="ALL";
+let selectedMarket="h2h";
+let loading=false;
+let submitting=false;
+let requestNumber=0;
+
+/*
+  The 30 football betting markets, grouped A–E.
+  key:null = the odds provider does not offer this market
+  at all (currently the fouls markets), so it is shown
+  honestly as unavailable instead of guessing an API key.
+*/
+const MARKET_SECTIONS=[
+  {id:"match_result",title:"A · Match Result & Handicap",markets:[
+    {key:"h2h",name:"Match Winner (1X2)"},
+    {key:"h2h_3_way",name:"Three-Way Match Result"},
+    {key:"double_chance",name:"Double Chance"},
+    {key:"double_chance_h1",name:"First-Half Double Chance"},
+    {key:"draw_no_bet",name:"Draw No Bet"},
+    {key:"spreads",name:"Asian Handicap"},
+    {key:"alternate_spreads",name:"Alternative Handicap"},
+    {key:"halftime_fulltime",name:"Half Time / Full Time"},
+    {key:"h2h_3_way_h1",name:"First-Half Match Result"},
+    {key:"h2h_3_way_h2",name:"Second-Half Match Result"}
+  ]},
+  {id:"goals",title:"B · Goals",markets:[
+    {key:"totals",name:"Over/Under Goals"},
+    {key:"alternate_totals",name:"Alternative Over/Under"},
+    {key:"btts",name:"Both Teams to Score"},
+    {key:"btts_h1",name:"First-Half Both Teams to Score"},
+    {key:"btts_h2",name:"Second-Half Both Teams to Score"},
+    {key:"correct_score",name:"Correct Score"},
+    {key:"correct_score_h1",name:"First-Half Correct Score"},
+    {key:"totals_h1",name:"First-Half Over/Under"},
+    {key:"totals_h2",name:"Second-Half Over/Under"},
+    {key:"team_totals",name:"Team Goals Over/Under"},
+    {key:"team_totals_h1",name:"First-Half Team Goals"},
+    {key:"team_totals_h2",name:"Second-Half Team Goals"}
+  ]},
+  {id:"corners",title:"C · Corners",markets:[
+    {key:"alternate_totals_corners",name:"Total Corners"},
+    {key:"alternate_spreads_corners",name:"Corner Handicap"},
+    {key:"alternate_team_totals_corners",name:"Team Total Corners"},
+    {key:"corners_1x2",name:"Corner Result"}
+  ]},
+  {id:"cards",title:"D · Cards",markets:[
+    {key:"alternate_totals_cards",name:"Total Cards"},
+    {key:"alternate_spreads_cards",name:"Card Handicap"}
+  ]},
+  {id:"fouls",title:"E · Fouls",markets:[
+    {key:null,name:"Total Fouls"},
+    {key:null,name:"Team Fouls"}
+  ]}
+];
+const THREE_COL_MARKETS=new Set(["h2h","h2h_3_way","h2h_3_way_h1","h2h_3_way_h2","corners_1x2"]);
+const H2H_LIKE_MARKETS=new Set(["h2h","h2h_3_way","h2h_3_way_h1","h2h_3_way_h2"]);
+
+let detailEvent=null;
+let detailState="idle";
+let detailError="";
+let detailReasons={};
+
+function dateKey(d){
+  const parts=new Intl.DateTimeFormat("en-CA",{
+    timeZone:TZ,year:"numeric",month:"2-digit",day:"2-digit"
+  }).formatToParts(d);
+  const get=k=>parts.find(p=>p.type===k)?.value;
+  return `${get("year")}-${get("month")}-${get("day")}`;
+}
+function shiftDate(key,days){
+  const d=new Date(key+"T12:00:00Z");
+  d.setUTCDate(d.getUTCDate()+days);
+  return d.toISOString().slice(0,10);
+}
+function dateLabel(key,opts={weekday:"short",day:"numeric",month:"short"}){
+  return new Intl.DateTimeFormat("en-NG",{...opts,timeZone:"UTC"})
+    .format(new Date(key+"T12:00:00Z"));
+}
+function today(){return dateKey(new Date())}
+function escapeHTML(s){
+  return String(s??"").replace(/[&<>"']/g,c=>({
+    "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
+  }[c]));
+}
+function safePrice(v){
+  const n=Number(v);
+  return Number.isFinite(n)&&n>1?n:null;
+}
+function points(price){return Math.round((Number(price)-1)*100)}
+function fmtTime(value){
+  const d=new Date(value);
+  return Number.isNaN(d.getTime())?"Time unavailable":
+    new Intl.DateTimeFormat("en-NG",{
+      timeZone:TZ,hour:"2-digit",minute:"2-digit",hour12:false
+    }).format(d);
+}
+function fmtDay(key){
+  if(key===today())return "Today";
+  if(key===shiftDate(today(),1))return "Tomorrow";
+  return dateLabel(key,{weekday:"long",day:"numeric",month:"short"});
+}
+function kickoffOf(e){return e.commence_time||e.kickoff||e.date||e.utcDate||e.fixture?.date}
+function kickoffDate(e){
+  const k=kickoffOf(e);
+  return k?dateKey(new Date(k)):"";
+}
+function isFinished(e){
+  return /FINISHED|COMPLETED|FULL.?TIME|(^|[^A-Z])FT([^A-Z]|$)|CANCELLED|POSTPONED|ABANDONED/i.test(e.status||"");
+}
+function isLive(e){
+  return /LIVE|IN.?PLAY|HALF.?TIME|PAUSED|EXTRA.?TIME/i.test(e.status||"");
+}
+function dateEligible(e){
+  const k=kickoffOf(e);
+  return !!k&&kickoffDate(e)===today()&&
+    new Date(k).getTime()>Date.now()&&!isLive(e)&&!isFinished(e);
+}
+async function fetchJSON(url){
+  const r=await fetch(url,{headers:{Accept:"application/json"}});
+  const data=await r.json().catch(()=>({}));
+  if(!r.ok)throw Error(data.message||data.error||("HTTP "+r.status));
+  if(data.success===false)throw Error(data.message||data.error||"Backend request failed");
+  return data;
+}
+function unwrapArray(data,keys){
+  if(Array.isArray(data))return data;
+  for(const key of keys)if(Array.isArray(data?.[key]))return data[key];
+  for(const key of ["data","response","result"]){
+    const nested=data?.[key];
+    if(Array.isArray(nested))return nested;
+    if(nested&&typeof nested==="object"){
+      for(const sub of keys)if(Array.isArray(nested[sub]))return nested[sub];
+    }
+  }
+  return [];
+}
+function normalizeSports(data){
+  return unwrapArray(data,["sports","competitions","response","data"])
+    .map(s=>({
+      key:s.key||s.sport_key||s.code,
+      title:s.title||s.sport_title||s.name||s.league||s.key,
+      active:s.active!==false,
+      group:s.group||""
+    }))
+    .filter(s=>s.key&&s.active&&String(s.key).startsWith("soccer"))
+    .sort((a,b)=>a.title.localeCompare(b.title));
+}
+function normalizeMarkets(item){
+  const out={};
+  if(item.markets&&typeof item.markets==="object"&&!Array.isArray(item.markets)){
+    for(const [key,m] of Object.entries(item.markets)){
+      if(m&&Array.isArray(m.outcomes)){
+        out[key]={...m,market_key:m.market_key||key,outcomes:m.outcomes};
+      }
+    }
+  }
+  if(Array.isArray(item.market_list)){
+    for(const m of item.market_list){
+      if(m?.market_key&&Array.isArray(m.outcomes))out[m.market_key]=m;
+    }
+  }
+  for(const bookmaker of (item.bookmakers||[])){
+    for(const m of (bookmaker.markets||[])){
+      const key=m.key||m.market_key;
+      if(!key)continue;
+      const existing=out[key]||{market_key:key,market_name:key,outcomes:[]};
+      for(const outcome of (m.outcomes||[])){
+        const price=safePrice(outcome.price);
+        if(price&&!existing.outcomes.some(x=>
+          x.name===outcome.name&&String(x.point??"")===String(outcome.point??"")
+        )){
+          existing.outcomes.push({...outcome,price});
+        }
+      }
+      out[key]=existing;
+    }
+  }
+  if(!out.h2h&&item.odds){
+    const outcomes=[];
+    const home=item.home_team||item.home;
+    const away=item.away_team||item.away;
+    if(safePrice(item.odds.home))outcomes.push({name:home,price:Number(item.odds.home)});
+    if(safePrice(item.odds.draw))outcomes.push({name:"Draw",price:Number(item.odds.draw)});
+    if(safePrice(item.odds.away))outcomes.push({name:away,price:Number(item.odds.away)});
+    if(outcomes.length)out.h2h={market_key:"h2h",market_name:"Match Result",outcomes};
+  }
+  return out;
+}
+function normalizeEvent(item,sport){
+  const home=item.home_team||item.home||item.teams?.home?.name||item.homeTeam?.name||item.fixture?.home;
+  const away=item.away_team||item.away||item.teams?.away?.name||item.awayTeam?.name||item.fixture?.away;
+  const kickoff=kickoffOf(item);
+  if(!home||!away||!kickoff||Number.isNaN(new Date(kickoff).getTime()))return null;
+
+  const markets=normalizeMarkets(item);
+  const sportKey=item.sport_key||item.sport?.key||sport?.key;
+  const id=item.event_id||item.id||item.fixture_id||item.fixture?.id;
+
+  if(!sportKey||!id)return null;
+
+  return {
+    id:String(id),
+    sport_key:String(sportKey),
+    sport_title:item.sport_title||item.league||item.competition?.name||sport?.title||sportKey,
+    home_team:String(home),
+    away_team:String(away),
+    commence_time:new Date(kickoff).toISOString(),
+    status:item.status||item.fixture?.status?.short||"TIMED",
+    markets,
+    odds:item.odds||{}
+  };
+}
+function selectionId(e,key,o){
+  return [e.sport_key,e.id,key,String(o.name),String(o.point??"")].join("|");
+}
+function outcomeLabel(o,e,key){
+  if(H2H_LIKE_MARKETS.has(key)){
+    const name=String(o.name||"");
+    if(name.toLowerCase()===e.home_team.toLowerCase())return "Home win";
+    if(name.toLowerCase()===e.away_team.toLowerCase())return "Away win";
+    if(name.toLowerCase()==="draw")return "Draw";
+  }
+  return String(o.name||"Outcome");
+}
+function outcomeLine(o){
+  return o.point!==undefined&&o.point!==null&&o.point!==""
+    ?` ${Number(o.point)>0?"+":""}${o.point}`:"";
+}
+function selectedForEvent(e){
+  return slip.find(p=>p.event_id===e.id&&p.sport_key===e.sport_key);
+}
+function addPick(e,key,o){
+  if(!dateEligible(e)){
+    alert("This challenge accepts picks only for today's matches before kickoff in Nigeria time.");
+    return;
+  }
+  const price=safePrice(o.price);
+  if(!price){alert("Valid odds are not available for this selection.");return}
+
+  const id=selectionId(e,key,o);
+  const existing=selectedForEvent(e);
+
+  if(existing&&existing.selection_id===id){
+    slip=slip.filter(p=>p.selection_id!==id);
+  }else{
+    if(existing){
+      slip=slip.filter(p=>!(p.event_id===e.id&&p.sport_key===e.sport_key));
+    }else if(slip.length>=MAX_PICKS){
+      alert("Your slip already contains 15 different matches. Remove a selection before adding another.");
+      return;
+    }
+
+    slip.push({
+      selection_id:id,
+      event_id:e.id,
+      sport_key:e.sport_key,
+      kickoff:e.commence_time,
+      home_team:e.home_team,
+      away_team:e.away_team,
+      league:e.sport_title,
+      market_key:key,
+      market_name:e.markets[key]?.market_name||key,
+      outcome:String(o.name),
+      selection:outcomeLabel(o,e,key),
+      point:o.point??null,
+      price,
+      odds:price,
+      potential_points:points(price)
+    });
+  }
+
+  renderMatches();
+  renderSlip();
+}
+function renderDates(){
+  const box=document.getElementById("dates");
+  let html="";
+  for(let i=0;i<14;i++){
+    const key=shiftDate(today(),i);
+    html+=`<button class="day ${key===selectedDate?"active":""}" data-date="${key}">
+      <strong>${i===0?"TODAY":i===1?"TOMORROW":dateLabel(key,{weekday:"short"}).toUpperCase()}</strong>
+      <span>${dateLabel(key,{day:"numeric",month:"short"})}</span>
+    </button>`;
+  }
+  box.innerHTML=html;
+  box.querySelectorAll("[data-date]").forEach(b=>b.addEventListener("click",()=>{
+    selectedDate=b.dataset.date;
+    renderDates();
+    renderMatches();
+  }));
+}
+function renderOdds(e){
+  const key=selectedMarket;
+  const m=e.markets?.[key];
+  if(!m||!Array.isArray(m.outcomes)||!m.outcomes.length){
+    return `<div class="empty">No ${escapeHTML(key)} odds returned for this match.</div>`;
+  }
+
+  const canPick=dateEligible(e);
+  const current=selectedForEvent(e);
+  const outcomes=m.outcomes.filter(o=>safePrice(o.price));
+  if(!outcomes.length)return `<div class="empty">Valid odds are unavailable.</div>`;
+
+  const cls=key==="h2h"?"odds":"otheroutcomes";
+  return `<div class="${cls}">${outcomes.map(o=>{
+    const price=safePrice(o.price);
+    const label=outcomeLabel(o,e,key);
+    const id=selectionId(e,key,o);
+    const isSelected=current?.selection_id===id;
+    const line=o.point!==undefined&&o.point!==null?` ${Number(o.point)>0?"+":""}${o.point}`:"";
+    return `<button class="${isSelected?"selected":""}"
+      data-pick="${escapeHTML(e.id)}"
+      data-sport="${escapeHTML(e.sport_key)}"
+      data-key="${escapeHTML(key)}"
+      data-outcome="${escapeHTML(o.name)}"
+      data-point="${escapeHTML(o.point??"")}"
+      ${canPick?"":"disabled"}
+      title="${canPick?"Select this outcome":"Picks are closed for this match"}">
+      ${escapeHTML(label+line)}
+      <strong>${price.toFixed(2)}</strong>
+      <span class="small">${points(price)} potential pts</span>
+    </button>`;
   }).join("")}</div>`;
 }
 function renderMatch(e){
-  const markets=e.markets || {};
+  const m=e.markets?.[selectedMarket];
   const canPick=dateEligible(e);
   const chosen=selectedForEvent(e);
   const label=canPick?"Prediction open":isLive(e)?"LIVE":isFinished(e)?"Finished":"Picks closed";
@@ -19,41 +532,507 @@ function renderMatch(e){
       <div class="vs">VS</div>
       <div class="team">${escapeHTML(e.away_team)}</div>
     </div>
-    ${Object.entries(markets).map(([key,m]) => `<div class="match-market">
-        <div class="marketname">${escapeHTML(m?.market_name||({
-          h2h:"Match Winner (1X2)",
-          h2h_3_way:"Three-Way Match Result",
-          double_chance:"Double Chance",
-          double_chance_h1:"Double Chance – First Half",
-          draw_no_bet:"Draw No Bet",
-          spreads:"Asian Handicap / Spreads",
-          alternate_spreads:"Alternative Handicap",
-          totals:"Over/Under Goals",
-          alternate_totals:"Alternative Over/Under",
-          btts:"Both Teams to Score",
-          btts_h1:"Both Teams to Score – First Half",
-          btts_h2:"Both Teams to Score – Second Half",
-          correct_score:"Correct Score",
-          correct_score_h1:"Correct Score – First Half",
-          halftime_fulltime:"Half Time / Full Time",
-          h2h_3_way_h1:"First Half Match Result",
-          h2h_3_way_h2:"Second Half Match Result",
-          totals_h1:"First Half Over/Under",
-          totals_h2:"Second Half Over/Under",
-          team_totals:"Team Goals Over/Under",
-          team_totals_h1:"First Half Team Goals",
-          team_totals_h2:"Second Half Team Goals",
-          alternate_totals_corners:"Total Corners",
-          alternate_spreads_corners:"Corner Handicap",
-          alternate_team_totals_corners:"Team Total Corners",
-          corners_1x2:"Most Corners (1X2)",
-          alternate_totals_cards:"Total Cards",
-          alternate_spreads_cards:"Card Handicap",
-          player_shots:"Player Shots",
-          player_shots_on_target:"Player Shots on Target"
-        }[key]||key))} (${escapeHTML(label)})</div>
-        ${renderOddsForKey(e, key)}
-      </div>`).join("")}
+    <div class="marketname">${escapeHTML(m?.market_name||({
+      h2h:"Match Result",totals:"Over / Under",btts:"Both Teams To Score",spreads:"Handicap"
+    }[selectedMarket]||selectedMarket))} · ${escapeHTML(label)}</div>
+    ${renderOdds(e)}
+    <button class="cardcta" data-detail="${escapeHTML(e.id)}" data-sport="${escapeHTML(e.sport_key)}">ALL 30 MARKETS ›</button>
   </article>`;
 }
-function renderMatches() {
+function renderMatches(){
+  const box=document.getElementById("matches");
+  const msg=document.getElementById("message");
+
+  const matches=allEvents
+    .filter(e=>kickoffDate(e)===selectedDate)
+    .filter(e=>selectedCompetition==="ALL"||e.sport_key===selectedCompetition)
+    .sort((a,b)=>new Date(a.commence_time)-new Date(b.commence_time));
+
+  document.getElementById("matchCount").textContent=matches.length+" matches";
+  msg.textContent=`${fmtDay(selectedDate)} · ${dateLabel(selectedDate,{weekday:"long",day:"numeric",month:"long",year:"numeric"})} · Nigeria time`;
+
+  if(!matches.length){
+    box.innerHTML=`<div class="panel empty">No matches were returned for ${escapeHTML(fmtDay(selectedDate))}. Refresh the fixtures or check the backend response.</div>`;
+    return;
+  }
+
+  box.innerHTML=matches.map(renderMatch).join("");
+  box.querySelectorAll("[data-pick]").forEach(btn=>btn.addEventListener("click",()=>{
+    const e=allEvents.find(x=>x.id===btn.dataset.pick&&x.sport_key===btn.dataset.sport);
+    const key=btn.dataset.key;
+    const m=e?.markets?.[key];
+    const o=m?.outcomes?.find(x=>
+      String(x.name)===btn.dataset.outcome&&String(x.point??"")===btn.dataset.point
+    );
+    if(e&&o)addPick(e,key,o);
+  }));
+  box.querySelectorAll("[data-detail]").forEach(btn=>btn.addEventListener("click",()=>{
+    const e=allEvents.find(x=>x.id===btn.dataset.detail&&x.sport_key===btn.dataset.sport);
+    if(e)openDetail(e);
+  }));
+}
+
+/* -------------------------------------------------------
+   MATCH DETAIL — ALL 30 MARKETS
+------------------------------------------------------- */
+function openDetail(e){
+  detailEvent=e;
+  detailState="loading";
+  detailError="";
+  detailReasons={};
+  showDetail();
+
+  fetchJSON(API+"/api/match-markets?sport="+encodeURIComponent(e.sport_key)+
+    "&eventId="+encodeURIComponent(e.id))
+    .then(data=>{
+      if(!detailEvent||detailEvent.id!==e.id)return;
+
+      /*
+        Merge the event-level markets returned by the backend
+        into the event so every market renderer (card quick
+        view and detail view) can use them.
+      */
+      const merged=normalizeMarkets({markets:data.markets});
+      e.markets={...e.markets,...merged};
+
+      for(const g of data.groups||[]){
+        for(const mk of g.markets||[]){
+          if(mk.status==="unavailable"&&mk.reason){
+            detailReasons[mk.name]=mk.reason;
+          }
+        }
+      }
+
+      detailState="ready";
+      showDetail();
+    })
+    .catch(err=>{
+      if(!detailEvent||detailEvent.id!==e.id)return;
+      detailState="error";
+      detailError=err.message||"Could not load markets.";
+      showDetail();
+    });
+}
+function closeDetail(){
+  detailEvent=null;
+  detailState="idle";
+  document.getElementById("detail").hidden=true;
+  renderMatches();
+}
+function detailOutcomeButtons(e,key,m){
+  const canPick=dateEligible(e);
+  const current=selectedForEvent(e);
+  const outcomes=(m.outcomes||[]).filter(o=>safePrice(o.price));
+  if(!outcomes.length)return `<div class="unavail">Valid odds are unavailable for this market.</div>`;
+
+  const cls=THREE_COL_MARKETS.has(key)?"mgrid3":"mgrid2";
+  return `<div class="${cls}">${outcomes.map(o=>{
+    const price=safePrice(o.price);
+    const label=outcomeLabel(o,e,key)+outcomeLine(o);
+    const id=selectionId(e,key,o);
+    const isSelected=current?.selection_id===id;
+    return `<button class="${isSelected?"selected":""}"
+      data-dpick="1"
+      data-key="${escapeHTML(key)}"
+      data-outcome="${escapeHTML(o.name)}"
+      data-point="${escapeHTML(o.point??"")}"
+      ${canPick?"":"disabled"}
+      title="${canPick?"Select this outcome":"Picks are closed for this match"}">
+      ${escapeHTML(label)}
+      <strong>${price.toFixed(2)}</strong>
+      <span class="small">${points(price)} potential pts</span>
+    </button>`;
+  }).join("")}</div>`;
+}
+function renderDetailMarket(e,def){
+  if(!def.key){
+    return `<div class="mblock"><h3>${escapeHTML(def.name)}</h3>
+      <div class="unavail">Not offered by The Odds API, so no odds can be displayed. This market is listed for completeness only.</div>
+    </div>`;
+  }
+
+  const m=e.markets?.[def.key];
+
+  if(m&&Array.isArray(m.outcomes)&&m.outcomes.length){
+    return `<div class="mblock"><h3>${escapeHTML(def.name)}</h3>
+      ${detailOutcomeButtons(e,def.key,m)}
+    </div>`;
+  }
+
+  if(detailState==="loading"){
+    return `<div class="mblock"><h3>${escapeHTML(def.name)}</h3>
+      <div class="unavail">Loading odds…</div>
+    </div>`;
+  }
+
+  const reason=detailReasons[def.name]||
+    "No bookmaker returned odds for this market on this match.";
+
+  return `<div class="mblock"><h3>${escapeHTML(def.name)}</h3>
+    <div class="unavail">Unavailable — ${escapeHTML(reason)}</div>
+  </div>`;
+}
+function showDetail(){
+  const e=detailEvent;
+  const wrap=document.getElementById("detail");
+  if(!e){wrap.hidden=true;return}
+
+  wrap.hidden=false;
+  document.getElementById("detailLeague").textContent=e.sport_title;
+  document.getElementById("detailTeams").textContent=`${e.home_team} vs ${e.away_team}`;
+  document.getElementById("detailMeta").textContent=
+    `${fmtDay(kickoffDate(e))} · ${fmtTime(e.commence_time)} · Nigeria time · ${dateEligible(e)?"Prediction open":"Picks closed"}`;
+
+  const notice=document.getElementById("detailNotice");
+  if(detailState==="loading"){
+    notice.textContent="Loading all available markets for this match from your FootStats backend…";
+  }else if(detailState==="error"){
+    notice.innerHTML=`<span class="error">Could not load the full market list:</span> ${escapeHTML(detailError)} Showing markets already available. Tap Close and reopen the match to retry.`;
+  }else{
+    notice.textContent="All 30 markets. Markets without odds were not returned by the provider for this match. Fouls markets are not offered by The Odds API.";
+  }
+
+  document.getElementById("detailBody").innerHTML=MARKET_SECTIONS.map(section=>
+    `<div class="msection">${escapeHTML(section.title)}</div>`+
+    section.markets.map(def=>renderDetailMarket(e,def)).join("")
+  ).join("");
+
+  document.getElementById("detailBody").querySelectorAll("[data-dpick]").forEach(btn=>{
+    btn.addEventListener("click",()=>{
+      const key=btn.dataset.key;
+      const m=detailEvent?.markets?.[key];
+      const o=m?.outcomes?.find(x=>
+        String(x.name)===btn.dataset.outcome&&String(x.point??"")===btn.dataset.point
+      );
+      if(detailEvent&&o){
+        addPick(detailEvent,key,o);
+        showDetail();
+      }
+    });
+  });
+}
+async function loadSports(){
+  const data=await fetchJSON(API+"/api/odds/sports");
+  sports=normalizeSports(data);
+
+  if(!sports.length)throw Error("No active soccer competitions were returned by the backend.");
+
+  const select=document.getElementById("competition");
+  const previous=selectedCompetition;
+  select.innerHTML='<option value="ALL">All available competitions</option>'+
+    sports.map(s=>`<option value="${escapeHTML(s.key)}">${escapeHTML(s.title)}</option>`).join("");
+
+  if(previous!=="ALL"&&sports.some(s=>s.key===previous))select.value=previous;
+}
+async function loadMatches(){
+  if(loading)return;
+  loading=true;
+  const thisRequest=++requestNumber;
+  const msg=document.getElementById("message");
+  const box=document.getElementById("matches");
+  const button=document.getElementById("refresh");
+
+  button.disabled=true;
+  button.textContent="Loading...";
+  msg.textContent="Loading fixtures from your FootStats backend...";
+  box.innerHTML='<div class="panel empty">Please wait while fixtures load.</div>';
+
+  try{
+    if(!sports.length)await loadSports();
+
+    /*
+      Use the backend's aggregate fixtures endpoint instead of firing
+      one Odds API request per competition from the browser.
+    */
+    const data=await fetchJSON(API+"/api/fixtures?date="+encodeURIComponent(selectedDate));
+    if(thisRequest!==requestNumber)return;
+
+    const raw=unwrapArray(data,["fixtures","matches","events","response","data"]);
+    const byId=new Map();
+
+    for(const item of raw){
+      const sportKey=item.sport_key||item.sport?.key||item.sportKey;
+      const sport=sports.find(s=>s.key===sportKey)||{
+        key:sportKey,
+        title:item.sport_title||item.league||item.competition?.name||sportKey
+      };
+      const event=normalizeEvent(item,sport);
+      if(!event)continue;
+      const uniqueKey=event.sport_key+"|"+event.id;
+      byId.set(uniqueKey,event);
+    }
+
+    allEvents=[...byId.values()];
+    renderMatches();
+
+    if(!allEvents.length){
+      msg.innerHTML='<span class="error">No fixtures were returned.</span> Check whether this endpoint supports the selected date and whether the Odds API has events for that date.';
+    }else{
+      msg.textContent=`Loaded ${allEvents.length} fixtures for ${selectedDate}. Select a market to inspect the odds returned by the backend.`;
+    }
+  }catch(err){
+    if(thisRequest!==requestNumber)return;
+    msg.innerHTML=`<span class="error">Could not load fixtures:</span> ${escapeHTML(err.message)}. Check your Render service and try again.`;
+    box.innerHTML="";
+  }finally{
+    if(thisRequest===requestNumber){
+      loading=false;
+      button.disabled=false;
+      button.textContent="↻ Refresh matches";
+    }
+  }
+}
+function renderSlip(){
+  document.getElementById("slipCount").textContent=slip.length;
+  document.getElementById("pickTotal").textContent=slip.length+"/"+MAX_PICKS;
+  document.getElementById("potentialPoints").textContent=
+    slip.reduce((n,p)=>n+Number(p.potential_points||0),0);
+  document.getElementById("ticketStatus").textContent=
+    slip.length===MAX_PICKS?"Ready":slip.length?"Incomplete":"Empty";
+
+  const box=document.getElementById("slip");
+  if(!slip.length){
+    box.innerHTML='<div class="empty">Your slip is empty. Select a market outcome from today’s matches.</div>';
+  }else{
+    box.innerHTML=slip.map((p,i)=>`<div class="pick">
+      <div class="pickhead">
+        <strong>${escapeHTML(p.home_team)} vs ${escapeHTML(p.away_team)}</strong>
+        <button class="remove" data-remove="${i}">Remove</button>
+      </div>
+      <div class="small">${escapeHTML(p.league)} · ${fmtTime(p.kickoff)} · ${escapeHTML(p.market_name)}</div>
+      <div class="row" style="justify-content:space-between;margin-top:7px">
+        <span>${escapeHTML(p.selection||p.outcome)} @ ${Number(p.price).toFixed(2)}</span>
+        <span class="point">+${Number(p.potential_points)} potential pts</span>
+      </div>
+    </div>`).join("");
+
+    box.querySelectorAll("[data-remove]").forEach(b=>b.addEventListener("click",()=>{
+      slip.splice(Number(b.dataset.remove),1);
+      renderSlip();
+      renderMatches();
+    }));
+  }
+
+  const msg=document.getElementById("slipMessage");
+  const button=document.getElementById("submitSlip");
+
+  if(!user)msg.textContent="Sign in to submit your prediction.";
+  else if(slip.length<MAX_PICKS)msg.textContent=`Choose ${MAX_PICKS-slip.length} more different match(es) to complete your slip.`;
+  else msg.textContent="Your slip has 15 different matches and is ready for submission.";
+
+  button.disabled=!user||slip.length!==MAX_PICKS||submitting;
+}
+async function checkUser(){
+  const {data,error}=await db.auth.getSession();
+  if(error)throw error;
+  user=data.session?.user||null;
+  updateAccount();
+  renderSlip();
+}
+function updateAccount(){
+  document.getElementById("accountState").textContent=
+    user?"Signed in as "+(user.email||"your account"):"You are not signed in.";
+  document.getElementById("authForm").hidden=!!user;
+  document.getElementById("signOut").hidden=!user;
+}
+async function authAction(type){
+  const email=document.getElementById("email").value.trim();
+  const password=document.getElementById("password").value;
+  const msg=document.getElementById("authMessage");
+
+  if(!email||!password){msg.textContent="Enter your email and password.";return}
+  if(password.length<6){msg.textContent="Password must contain at least 6 characters.";return}
+
+  msg.textContent="Please wait...";
+  document.getElementById("signIn").disabled=true;
+  document.getElementById("signUp").disabled=true;
+
+  try{
+    const result=type==="in"
+      ?await db.auth.signInWithPassword({email,password})
+      :await db.auth.signUp({email,password});
+
+    if(result.error)throw result.error;
+
+    user=result.data.session?.user||result.data.user||null;
+    if(type==="up"&&!result.data.session){
+      user=null;
+      msg.textContent="Account created. Check your email to confirm your account, then sign in.";
+    }else{
+      msg.textContent=type==="in"?"Signed in successfully.":"Account created and signed in.";
+    }
+
+    updateAccount();
+    renderSlip();
+  }catch(err){
+    msg.textContent=err.message||"Authentication failed.";
+  }finally{
+    document.getElementById("signIn").disabled=false;
+    document.getElementById("signUp").disabled=false;
+  }
+}
+async function submitSlip(){
+  const msg=document.getElementById("slipMessage");
+  const button=document.getElementById("submitSlip");
+
+  if(submitting)return;
+  if(!user){msg.textContent="Sign in first.";return}
+  if(slip.length!==MAX_PICKS){
+    msg.textContent=`You must select exactly ${MAX_PICKS} different matches.`;
+    return;
+  }
+
+  const eventKeys=slip.map(p=>p.sport_key+"|"+p.event_id);
+  if(new Set(eventKeys).size!==MAX_PICKS){
+    msg.textContent="Your slip contains duplicate matches. Remove duplicates before submitting.";
+    return;
+  }
+
+  const invalid=slip.find(p=>
+    !p.event_id||!p.sport_key||!p.market_key||
+    !p.home_team||!p.away_team||!p.kickoff||
+    !safePrice(p.price)||kickoffDate(p)!==today()||
+    new Date(p.kickoff).getTime()<=Date.now()
+  );
+
+  if(invalid){
+    msg.textContent="At least one match is no longer eligible or is missing required data. Remove it and choose another match.";
+    return;
+  }
+
+  submitting=true;
+  button.disabled=true;
+  msg.textContent="Submitting your prediction...";
+
+  try{
+    /*
+      Keep the existing Supabase table contract:
+      user_id, picks, point, points, status.
+      Preserve the Odds API event ID and sport key for settlement.
+    */
+    const payload={
+      user_id:user.id,
+      picks:slip.map(p=>({
+        event_id:p.event_id,
+        sport_key:p.sport_key,
+        kickoff:p.kickoff,
+        home_team:p.home_team,
+        away_team:p.away_team,
+        league:p.league,
+        market_key:p.market_key,
+        market_name:p.market_name,
+        outcome:p.outcome,
+        selection:p.selection,
+        price:Number(p.price),
+        odds:Number(p.price),
+        point:Number(p.potential_points),
+        points:Number(p.potential_points),
+        point_value:p.point
+      })),
+      point:0,
+      points:0,
+      status:"pending"
+    };
+
+    const {data,error}=await db
+      .from("prediction_entries")
+      .insert(payload)
+      .select();
+
+    if(error)throw error;
+
+    msg.innerHTML='<span class="success">Prediction submitted successfully!</span> Your ticket is saved and awaiting scoring.';
+    slip=[];
+    renderSlip();
+    renderMatches();
+    await loadLeaderboard();
+  }catch(err){
+    msg.innerHTML=`<span class="error">Could not submit:</span> ${escapeHTML(err.message||"Please try again.")}`;
+  }finally{
+    submitting=false;
+    renderSlip();
+  }
+}
+async function loadLeaderboard(){
+  const box=document.getElementById("ranks");
+  box.innerHTML='<div class="empty">Loading leaderboard...</div>';
+
+  try{
+    const data=await fetchJSON(API+"/api/leaderboard");
+    const rows=unwrapArray(data,["leaderboard","entries","rankings","data","response"]);
+
+    if(!rows.length){
+      box.innerHTML='<div class="empty">No leaderboard entries returned yet.</div>';
+      return;
+    }
+
+    box.innerHTML=rows.map((r,i)=>{
+      const rank=r.rank??i+1;
+      const pointsValue=Number(r.points??r.point??0);
+      const tickets=Number(r.tickets??r.ticket_count??0);
+      const name=r.display_name||r.username||r.name||
+        (r.user_id?"Player "+String(r.user_id).slice(0,8):"Player");
+      return `<div class="pickhead" style="padding:12px 0;border-bottom:1px solid var(--border)">
+        <span><strong>#${escapeHTML(rank)}</strong> ${escapeHTML(name)}</span>
+        <span><strong class="success">${Number.isFinite(pointsValue)?pointsValue:0} pts</strong>
+        <span class="small"> · ${Number.isFinite(tickets)?tickets:0} tickets</span></span>
+      </div>`;
+    }).join("");
+  }catch(err){
+    box.innerHTML=`<div class="empty error">Leaderboard unavailable: ${escapeHTML(err.message)}</div>`;
+  }
+}
+document.querySelectorAll("nav [data-page]").forEach(btn=>btn.addEventListener("click",()=>{
+  document.querySelectorAll("nav [data-page]").forEach(b=>b.classList.toggle("active",b===btn));
+  document.querySelectorAll("main section").forEach(s=>{
+    s.hidden=s.id!=="page-"+btn.dataset.page;
+  });
+  if(btn.dataset.page==="leaderboard")loadLeaderboard();
+  if(btn.dataset.page==="slip")renderSlip();
+}));
+document.getElementById("competition").addEventListener("change",()=>{
+  selectedCompetition=document.getElementById("competition").value;
+  renderMatches();
+});
+document.getElementById("market").addEventListener("change",()=>{
+  selectedMarket=document.getElementById("market").value;
+  renderMatches();
+});
+document.getElementById("refresh").addEventListener("click",loadMatches);
+document.getElementById("refreshRanks").addEventListener("click",loadLeaderboard);
+document.getElementById("signIn").addEventListener("click",()=>authAction("in"));
+document.getElementById("signUp").addEventListener("click",()=>authAction("up"));
+document.getElementById("signOut").addEventListener("click",async()=>{
+  const {error}=await db.auth.signOut();
+  if(error){
+    document.getElementById("authMessage").textContent=error.message;
+    return;
+  }
+  user=null;
+  updateAccount();
+  renderSlip();
+  document.getElementById("authMessage").textContent="You have signed out.";
+});
+document.getElementById("submitSlip").addEventListener("click",submitSlip);
+document.getElementById("detailClose").addEventListener("click",closeDetail);
+document.getElementById("detail").addEventListener("click",ev=>{
+  if(ev.target===ev.currentTarget)closeDetail();
+});
+document.addEventListener("keydown",ev=>{
+  if(ev.key==="Escape"&&!document.getElementById("detail").hidden)closeDetail();
+});
+db.auth.onAuthStateChange((_event,session)=>{
+  user=session?.user||null;
+  updateAccount();
+  renderSlip();
+});
+
+renderDates();
+checkUser().catch(err=>{
+  document.getElementById("accountState").textContent="Could not check login status: "+err.message;
+});
+loadMatches();
+</script>
+</body>
+</html>
+ 
