@@ -363,43 +363,81 @@ async function supabaseRequest(path, options = {}) {
 }
 
 /* -------------------------------------------------------
-   MARKET REFERENCE CATALOGUE
+   MARKET REFERENCE CATALOGUE — THE 30 FOOTBALL MARKETS
+
+   Grouped A–E exactly as documented for the product.
+
+   - key: The Odds API market key (null when the provider
+     does not offer the market at all).
+   - endpoint: "featured" markets come back on the standard
+     odds endpoint; "event" markets must be requested per
+     event through the event odds endpoint.
+   - supported: false means The Odds API has no such market
+     (currently the two fouls markets). They are listed for
+     the UI so the product can show them honestly as
+     unavailable instead of guessing an API key.
+
+   NOTE: even for supported keys, actual availability varies
+   by sport, event, region and bookmaker. Never assume a key
+   returns data — always check the response.
 ------------------------------------------------------- */
 
 const MARKET_CATALOG = [
-  { key: "h2h", name: "Match Winner (1X2)", endpoint: "featured" },
-  { key: "h2h_3_way", name: "Three-Way Match Result", endpoint: "event" },
-  { key: "double_chance", name: "Double Chance", endpoint: "event" },
-  { key: "double_chance_h1", name: "Double Chance – First Half", endpoint: "event" },
-  { key: "draw_no_bet", name: "Draw No Bet", endpoint: "event" },
-  { key: "spreads", name: "Asian Handicap / Spreads", endpoint: "featured" },
-  { key: "alternate_spreads", name: "Alternative Handicap", endpoint: "event" },
-  { key: "totals", name: "Over/Under Goals", endpoint: "featured" },
-  { key: "alternate_totals", name: "Alternative Over/Under", endpoint: "event" },
-  { key: "btts", name: "Both Teams to Score", endpoint: "event" },
-  { key: "btts_h1", name: "Both Teams to Score – First Half", endpoint: "event" },
-  { key: "btts_h2", name: "Both Teams to Score – Second Half", endpoint: "event" },
-  { key: "correct_score", name: "Correct Score", endpoint: "event" },
-  { key: "correct_score_h1", name: "Correct Score – First Half", endpoint: "event" },
-  { key: "halftime_fulltime", name: "Half Time / Full Time", endpoint: "event" },
-  { key: "h2h_3_way_h1", name: "First Half Match Result", endpoint: "event" },
-  { key: "h2h_3_way_h2", name: "Second Half Match Result", endpoint: "event" },
-  { key: "totals_h1", name: "First Half Over/Under", endpoint: "event" },
-  { key: "totals_h2", name: "Second Half Over/Under", endpoint: "event" },
-  { key: "team_totals", name: "Team Goals Over/Under", endpoint: "event" },
-  { key: "team_totals_h1", name: "First Half Team Goals", endpoint: "event" },
-  { key: "team_totals_h2", name: "Second Half Team Goals", endpoint: "event" },
-  { key: "alternate_totals_corners", name: "Total Corners", endpoint: "event" },
-  { key: "alternate_spreads_corners", name: "Corner Handicap", endpoint: "event" },
-  { key: "alternate_team_totals_corners", name: "Team Total Corners", endpoint: "event" },
-  { key: "corners_1x2", name: "Most Corners (1X2)", endpoint: "event" },
-  { key: "alternate_totals_cards", name: "Total Cards", endpoint: "event" },
-  { key: "alternate_spreads_cards", name: "Card Handicap", endpoint: "event" },
-  { key: "player_shots", name: "Player Shots", endpoint: "event" },
-  { key: "player_shots_on_target", name: "Player Shots on Target", endpoint: "event" }
+  /* A. Match result and handicap markets */
+  { key: "h2h", name: "Match Winner (1X2)", group: "match_result", endpoint: "featured", supported: true },
+  { key: "h2h_3_way", name: "Three-Way Match Result", group: "match_result", endpoint: "event", supported: true },
+  { key: "double_chance", name: "Double Chance", group: "match_result", endpoint: "event", supported: true },
+  { key: "double_chance_h1", name: "First-Half Double Chance", group: "match_result", endpoint: "event", supported: true },
+  { key: "draw_no_bet", name: "Draw No Bet", group: "match_result", endpoint: "event", supported: true },
+  { key: "spreads", name: "Asian Handicap", group: "match_result", endpoint: "featured", supported: true },
+  { key: "alternate_spreads", name: "Alternative Handicap", group: "match_result", endpoint: "event", supported: true },
+  { key: "halftime_fulltime", name: "Half Time / Full Time", group: "match_result", endpoint: "event", supported: true },
+  { key: "h2h_3_way_h1", name: "First-Half Match Result", group: "match_result", endpoint: "event", supported: true },
+  { key: "h2h_3_way_h2", name: "Second-Half Match Result", group: "match_result", endpoint: "event", supported: true },
+
+  /* B. Goal markets */
+  { key: "totals", name: "Over/Under Goals", group: "goals", endpoint: "featured", supported: true },
+  { key: "alternate_totals", name: "Alternative Over/Under", group: "goals", endpoint: "event", supported: true },
+  { key: "btts", name: "Both Teams to Score", group: "goals", endpoint: "event", supported: true },
+  { key: "btts_h1", name: "First-Half Both Teams to Score", group: "goals", endpoint: "event", supported: true },
+  { key: "btts_h2", name: "Second-Half Both Teams to Score", group: "goals", endpoint: "event", supported: true },
+  { key: "correct_score", name: "Correct Score", group: "goals", endpoint: "event", supported: true },
+  { key: "correct_score_h1", name: "First-Half Correct Score", group: "goals", endpoint: "event", supported: true },
+  { key: "totals_h1", name: "First-Half Over/Under", group: "goals", endpoint: "event", supported: true },
+  { key: "totals_h2", name: "Second-Half Over/Under", group: "goals", endpoint: "event", supported: true },
+  { key: "team_totals", name: "Team Goals Over/Under", group: "goals", endpoint: "event", supported: true },
+  { key: "team_totals_h1", name: "First-Half Team Goals", group: "goals", endpoint: "event", supported: true },
+  { key: "team_totals_h2", name: "Second-Half Team Goals", group: "goals", endpoint: "event", supported: true },
+
+  /* C. Corner markets */
+  { key: "alternate_totals_corners", name: "Total Corners", group: "corners", endpoint: "event", supported: true },
+  { key: "alternate_spreads_corners", name: "Corner Handicap", group: "corners", endpoint: "event", supported: true },
+  { key: "alternate_team_totals_corners", name: "Team Total Corners", group: "corners", endpoint: "event", supported: true },
+  { key: "corners_1x2", name: "Corner Result", group: "corners", endpoint: "event", supported: true },
+
+  /* D. Card markets */
+  { key: "alternate_totals_cards", name: "Total Cards", group: "cards", endpoint: "event", supported: true },
+  { key: "alternate_spreads_cards", name: "Card Handicap", group: "cards", endpoint: "event", supported: true },
+
+  /* E. Fouls markets — NOT offered by The Odds API.
+     Listed so the UI can display them as unavailable.
+     Do not request keys that the provider does not have. */
+  { key: null, name: "Total Fouls", group: "fouls", endpoint: null, supported: false },
+  { key: null, name: "Team Fouls", group: "fouls", endpoint: null, supported: false }
 ];
 
-const ALL_MARKET_KEYS = MARKET_CATALOG.map(m => m.key).join(",");
+const MARKET_GROUPS = [
+  { id: "match_result", title: "Match Result & Handicap" },
+  { id: "goals", title: "Goals" },
+  { id: "corners", title: "Corners" },
+  { id: "cards", title: "Cards" },
+  { id: "fouls", title: "Fouls" }
+];
+
+/* Market keys that can actually be requested from the provider. */
+const REQUESTABLE_MARKET_KEYS = MARKET_CATALOG
+  .filter(m => m.supported && m.key)
+  .map(m => m.key);
 
 function marketLabel(key) {
   const item = MARKET_CATALOG.find(m => m.key === key);
@@ -544,6 +582,7 @@ app.get("/", (req, res) => {
       "/api/markets/catalog",
       "/api/markets?sport=soccer_epl&eventId=EVENT_ID",
       "/api/event-odds?sport=soccer_epl&eventId=EVENT_ID&markets=h2h,totals",
+      "/api/match-markets?sport=soccer_epl&eventId=EVENT_ID",
       "/api/fixtures",
       "/api/fixtures?date=YYYY-MM-DD",
       "/api/scores?sport=soccer_epl",
@@ -594,7 +633,8 @@ app.get("/api/markets/catalog", (req, res) => {
     success: true,
     provider: "The Odds API",
     count: MARKET_CATALOG.length,
-    note: "Reference catalogue only. Actual market availability depends on sport, event and bookmaker.",
+    note: "Reference catalogue of the 30 product markets. Actual availability depends on sport, event, region and bookmaker. Markets with supported=false are not offered by the provider at all.",
+    groups: MARKET_GROUPS,
     markets: MARKET_CATALOG
   });
 });
@@ -771,6 +811,264 @@ app.get("/api/event-odds", async (req, res) => {
 });
 
 /* -------------------------------------------------------
+   MATCH DETAIL — ALL 30 MARKETS FOR ONE EVENT
+
+   /api/match-markets?sport=soccer_epl&eventId=EVENT_ID
+
+   Called when a user taps a match card. Fetches every
+   provider-supported market from our 30-market catalogue
+   for that single event, in batches of 10 keys per Odds
+   API request (usage is charged per market per region,
+   so this endpoint intentionally serves ONE event only).
+
+   A short in-memory cache (per event + region) prevents
+   repeated taps on the same match from burning quota.
+
+   Markets the provider does not return are reported in
+   "unavailable" with a reason — they are never invented.
+------------------------------------------------------- */
+
+const MATCH_MARKETS_CACHE_TTL_MS = 10 * 60 * 1000;
+const MATCH_MARKETS_BATCH_SIZE = 10;
+const matchMarketsCache = new Map();
+
+async function fetchEventMarketBatch(sport, eventId, regions, marketKeys) {
+  const result = await oddsRequest(
+    `/sports/${encodeURIComponent(sport)}/events/${encodeURIComponent(eventId)}/odds`,
+    {
+      regions,
+      markets: marketKeys.join(","),
+      oddsFormat: "decimal",
+      dateFormat: "iso"
+    }
+  );
+
+  return result;
+}
+
+/*
+  Fetch a batch of market keys. If the provider rejects the
+  batch (e.g. one key is not valid for this sport/plan),
+  fall back to requesting each key individually so a single
+  unsupported key cannot take down the whole batch.
+*/
+async function fetchBatchResilient(sport, eventId, regions, marketKeys) {
+  try {
+    const result = await fetchEventMarketBatch(
+      sport, eventId, regions, marketKeys
+    );
+    return {
+      events: [result.data].filter(Boolean),
+      failures: [],
+      quota: { remaining: result.remaining, used: result.used }
+    };
+  } catch (batchError) {
+    const events = [];
+    const failures = [];
+    let quota = null;
+
+    for (const key of marketKeys) {
+      try {
+        const single = await fetchEventMarketBatch(
+          sport, eventId, regions, [key]
+        );
+        if (single.data) events.push(single.data);
+        quota = { remaining: single.remaining, used: single.used };
+      } catch (error) {
+        failures.push({ market: key, error: error.message });
+      }
+    }
+
+    if (!events.length && !failures.length) {
+      throw batchError;
+    }
+
+    return { events, failures, quota, batchError: batchError.message };
+  }
+}
+
+app.get("/api/match-markets", async (req, res) => {
+  try {
+    const sport = String(req.query.sport || "").trim();
+
+    const eventId = String(
+      req.query.eventId || req.query.event_id || ""
+    ).trim();
+
+    const regions = String(req.query.regions || "uk").trim();
+
+    if (!sport || !eventId) {
+      return sendError(
+        res,
+        400,
+        "Required: sport and eventId. Example: /api/match-markets?sport=soccer_epl&eventId=EVENT_ID"
+      );
+    }
+
+    const cacheKey = `${sport}|${eventId}|${regions}`;
+    const cached = matchMarketsCache.get(cacheKey);
+
+    if (cached && (Date.now() - cached.at) < MATCH_MARKETS_CACHE_TTL_MS) {
+      return res.json({
+        ...cached.payload,
+        cached: true
+      });
+    }
+
+    const batches = [];
+
+    for (let i = 0; i < REQUESTABLE_MARKET_KEYS.length; i += MATCH_MARKETS_BATCH_SIZE) {
+      batches.push(REQUESTABLE_MARKET_KEYS.slice(i, i + MATCH_MARKETS_BATCH_SIZE));
+    }
+
+    const mergedBookmakers = new Map();
+    const fetchFailures = [];
+
+    let eventInfo = null;
+    let requestsRemaining = null;
+    let requestsUsed = null;
+
+    for (const batch of batches) {
+      const { events, failures, quota, batchError } =
+        await fetchBatchResilient(sport, eventId, regions, batch);
+
+      fetchFailures.push(...failures);
+      if (batchError) {
+        fetchFailures.push({ market: batch.join(","), error: batchError });
+      }
+
+      if (quota) {
+        requestsRemaining = quota.remaining;
+        requestsUsed = quota.used;
+      }
+
+      for (const data of events) {
+        if (!eventInfo && data && data.id) {
+          eventInfo = {
+            id: data.id,
+            sport_key: data.sport_key || sport,
+            sport_title: data.sport_title || null,
+            home_team: data.home_team || null,
+            away_team: data.away_team || null,
+            commence_time: data.commence_time || null
+          };
+        }
+
+        for (const bookmaker of data.bookmakers || []) {
+          const bk = bookmaker.key || bookmaker.title || "unknown";
+
+          if (!mergedBookmakers.has(bk)) {
+            mergedBookmakers.set(bk, {
+              key: bookmaker.key,
+              title: bookmaker.title,
+              markets: []
+            });
+          }
+
+          mergedBookmakers.get(bk).markets.push(
+            ...(bookmaker.markets || [])
+          );
+        }
+      }
+    }
+
+    const mergedEvent = {
+      ...(eventInfo || {}),
+      id: eventId,
+      sport_key: sport,
+      bookmakers: Array.from(mergedBookmakers.values())
+    };
+
+    const markets = getBestMarkets(mergedEvent);
+
+    const returnedKeys = new Set(Object.keys(markets));
+
+    const failedKeys = new Set(
+      fetchFailures.map(f => f.market).filter(k => !k.includes(","))
+    );
+
+    const groups = MARKET_GROUPS.map(group => ({
+      id: group.id,
+      title: group.title,
+      markets: MARKET_CATALOG
+        .filter(m => m.group === group.id)
+        .map(m => {
+          if (!m.supported) {
+            return {
+              key: null,
+              name: m.name,
+              status: "unavailable",
+              reason: "The Odds API does not offer this market."
+            };
+          }
+
+          const found = markets[m.key];
+
+          if (found && found.outcomes.length) {
+            return {
+              key: m.key,
+              name: m.name,
+              status: "available",
+              bookmaker: found.bookmaker,
+              outcomes: found.outcomes
+            };
+          }
+
+          return {
+            key: m.key,
+            name: m.name,
+            status: "unavailable",
+            reason: failedKeys.has(m.key)
+              ? "The provider rejected this market key for this event or plan."
+              : "No bookmaker returned odds for this market on this event."
+          };
+        })
+    }));
+
+    const payload = {
+      success: true,
+      provider: "The Odds API",
+      sport,
+      eventId,
+      regions,
+
+      event: eventInfo || {
+        id: eventId,
+        sport_key: sport,
+        home_team: null,
+        away_team: null,
+        commence_time: null
+      },
+
+      groups,
+      markets,
+      returnedMarketKeys: Array.from(returnedKeys),
+      unavailableCount: groups
+        .flatMap(g => g.markets)
+        .filter(m => m.status === "unavailable").length,
+
+      requestsRemaining,
+      requestsUsed,
+      cacheTtlMs: MATCH_MARKETS_CACHE_TTL_MS
+    };
+
+    matchMarketsCache.set(cacheKey, {
+      at: Date.now(),
+      payload
+    });
+
+    if (matchMarketsCache.size > 500) {
+      const oldestKey = matchMarketsCache.keys().next().value;
+      matchMarketsCache.delete(oldestKey);
+    }
+
+    res.json({ ...payload, cached: false });
+  } catch (error) {
+    sendApiError(res, error);
+  }
+});
+
+/* -------------------------------------------------------
    SPORTS / COMPETITIONS
 
    /api/odds/sports is STATIC (zero API credits) and only
@@ -917,7 +1215,7 @@ async function fetchCompetitionFixturesForRange(sport, bounds) {
     `/sports/${encodeURIComponent(sport.key)}/odds`,
     {
       regions: "uk",
-      markets: ALL_MARKET_KEYS,
+      markets: "h2h",
       oddsFormat: "decimal",
       dateFormat: "iso",
       commenceTimeFrom: bounds.from,
@@ -1185,8 +1483,12 @@ function normalizeH2HSelection(selection, homeName, awayName) {
 }
 
 /*
-  Returns true, false, or null.
-  null means the selection cannot safely be settled.
+  Returns true, false, "void", or null.
+  - true/false: settled win/loss.
+  - "void": the selection is a push/refund (draw no bet draw,
+    handicap push). It is settled, contributes zero points,
+    and must NOT kill the ticket.
+  - null: the selection cannot safely be settled.
 */
 function settlePick(pick, event) {
   if (!event || event.completed !== true) return null;
@@ -1203,6 +1505,11 @@ function settlePick(pick, event) {
 
   const { home, away } = score;
 
+  const actualResult =
+    home > away ? "H" :
+    home < away ? "A" :
+    "D";
+
   if (market === "h2h" || market === "h2h_3_way") {
     const selected = normalizeH2HSelection(
       selection,
@@ -1212,12 +1519,36 @@ function settlePick(pick, event) {
 
     if (!selected) return null;
 
-    const actual =
-      home > away ? "H" :
-      home < away ? "A" :
-      "D";
+    return selected === actualResult;
+  }
 
-    return selected === actual;
+  if (market === "double_chance") {
+    /*
+      Provider outcome names look like "Arsenal/Draw",
+      "Draw/Chelsea", "Arsenal/Chelsea".
+    */
+    const parts = String(selection)
+      .split(/\/|,| or /i)
+      .map(part => normalizeH2HSelection(part, homeName, awayName))
+      .filter(Boolean);
+
+    if (!parts.length) return null;
+
+    return parts.includes(actualResult);
+  }
+
+  if (market === "draw_no_bet") {
+    const selected = normalizeH2HSelection(
+      selection,
+      homeName,
+      awayName
+    );
+
+    if (!selected || selected === "D") return null;
+
+    if (actualResult === "D") return "void";
+
+    return selected === actualResult;
   }
 
   if (market === "totals") {
@@ -1263,7 +1594,62 @@ function settlePick(pick, event) {
     return null;
   }
 
-  // Do not grade unsupported markets using guessed rules.
+  if (market === "correct_score") {
+    /*
+      Outcome names contain an exact score such as "2-1" or
+      "2:1", optionally prefixed with a team name.
+    */
+    const match = String(selection).match(
+      /(\d+)\s*[-:]\s*(\d+)/
+    );
+
+    if (!match) return null;
+
+    const selHome = Number(match[1]);
+    const selAway = Number(match[2]);
+
+    return selHome === home && selAway === away;
+  }
+
+  if (market === "spreads" || market === "alternate_spreads") {
+    /*
+      Asian handicap from the final score. Quarter lines
+      (x.25 / x.75) split the stake in real betting and
+      cannot be settled as a simple win/loss, so they are
+      deliberately left unsettled.
+    */
+    const point = safeNumber(
+      pick.point ?? pick.point_value ?? pick.line
+    );
+
+    if (point === null) return null;
+
+    if (Math.abs(point * 4) % 2 === 1) {
+      return null; // quarter line — half win / half loss
+    }
+
+    const selected = normalizeH2HSelection(
+      selection,
+      homeName,
+      awayName
+    );
+
+    if (selected !== "H" && selected !== "A") return null;
+
+    const adjustedHome = selected === "H" ? home + point : home;
+    const adjustedAway = selected === "A" ? away + point : away;
+
+    if (adjustedHome === adjustedAway) return "void";
+
+    return adjustedHome > adjustedAway;
+  }
+
+  /*
+    Every other market (half-time/second-half markets,
+    corners, cards, fouls, etc.) needs data the provider's
+    scores endpoint does not return, so it is never graded
+    on guessed rules.
+  */
   return null;
 }
 
@@ -1312,10 +1698,23 @@ function calculateTicket(picks, scoreEvents) {
       return pick;
     }
 
-    pick.result = won ? "won" : "lost";
     pick.settled = true;
     pick.final_score = readScores(event);
     pick.settled_at = new Date().toISOString();
+
+    if (won === "void") {
+      /*
+        Push/refund: settled, contributes nothing, and does
+        not kill the ticket.
+      */
+      pick.result = "void";
+      pick.settlement_note =
+        "Selection void (push/refund). It contributes 0 points and does not fail the ticket.";
+
+      return pick;
+    }
+
+    pick.result = won ? "won" : "lost";
 
     if (won) {
       const odds = getSavedOdds(pick);
@@ -1566,4 +1965,4 @@ app.listen(PORT, () => {
   console.log(`Active competitions (fixtures fetched): ${ACTIVE_COMPETITIONS.length}`);
   console.log(`Nigeria prediction date: ${todayNigeria()}`);
 });
- 
+  
