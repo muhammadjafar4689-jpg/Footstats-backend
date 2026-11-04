@@ -469,7 +469,7 @@ function getBestMarkets(event) {
 
       const existing = new Map(
         collected[key].outcomes.map(o => [
-          `${normalizeText(o.name)}|${o.point ?? ""}`,
+          `${normalizeText(o.name)}|${o.point ?? ""}|${normalizeText(o.description ?? "")}`,
           o
         ])
       );
@@ -480,7 +480,7 @@ function getBestMarkets(event) {
         if (price === null || price <= 1) continue;
 
         const identity =
-          `${normalizeText(outcome.name)}|${outcome.point ?? ""}`;
+          `${normalizeText(outcome.name)}|${outcome.point ?? ""}|${normalizeText(outcome.description ?? "")}`;
 
         const previous = existing.get(identity);
 
@@ -490,6 +490,11 @@ function getBestMarkets(event) {
             price,
             ...(outcome.point !== undefined
               ? { point: outcome.point }
+              : {}),
+            // FIX: keep provider description — it holds the TEAM NAME
+            // for team_totals picks. Without it market 20 never settles.
+            ...(outcome.description
+              ? { description: outcome.description }
               : {})
           });
         }
@@ -587,6 +592,7 @@ app.get("/", (req, res) => {
       "/api/fixtures?date=YYYY-MM-DD",
       "/api/scores?sport=soccer_epl",
       "/api/score-predictions",
+      "/api/cards",
       "/api/leaderboard"
     ]
   });
@@ -1077,14 +1083,15 @@ app.get("/api/match-markets", async (req, res) => {
    sync automatically.
 ------------------------------------------------------- */
 
-const ACTIVE_COMPETITIONS = [
-  { key: "soccer_epl", name: "EPL" },
-  { key: "soccer_spain_la_liga", name: "La Liga - Spain" },
-  { key: "soccer_italy_serie_a", name: "Serie A - Italy" },
-  { key: "soccer_germany_bundesliga", name: "Bundesliga - Germany" },
-  { key: "soccer_france_ligue_one", name: "Ligue 1 - France" },
-  { key: "soccer_uefa_champs_league", name: "UEFA Champions League" }
-];
+// All 50 active by default. Trim without code edits:
+// ACTIVE_COMPETITIONS="soccer_epl,soccer_spain_la_liga" in Render.
+const ACTIVE_COMPETITIONS = (process.env.ACTIVE_COMPETITIONS
+  ? process.env.ACTIVE_COMPETITIONS.split(",").map(s => s.trim()).filter(Boolean)
+  : COMPETITIONS.map(c => c.key)
+).map(key => ({
+  key,
+  name: (COMPETITIONS.find(c => c.key === key) || { name: key }).name
+}));
 
 const TODAY_CACHE_REFRESH_MS = 12 * 60 * 60 * 1000;
 const FUTURE_CACHE_REFRESH_MS = 48 * 60 * 60 * 1000;
@@ -1482,6 +1489,33 @@ function normalizeH2HSelection(selection, homeName, awayName) {
   return null;
 }
 
+/* OPTION B backstop: markets that can NEVER be auto-settled
+   (/scores returns full-time goals only — no HT, corners,
+   cards or fouls). The UI blocks these; this stops a forged
+   request from smuggling one in. */
+const SETTLEABLE_MARKET_KEYS = new Set([
+  "h2h", "h2h_3_way", "double_chance", "draw_no_bet",
+  "spreads", "alternate_spreads",
+  "totals", "alternate_totals",
+  "btts", "correct_score", "team_totals"
+]);
+
+// .25 / .75 lines split the stake — never a clean win/loss
+function isQuarterLine(point) {
+  return point !== null && Math.abs(point * 4) % 2 === 1;
+}
+
+/*
+  The betting line (2.5, -1, ...) wherever the frontend hid it.
+  point_value is read FIRST because legacy rows stored potential
+  points in `point` and the real line in `point_value`.
+*/
+function getLine(pick) {
+  return safeNumber(
+    pick.point_value ?? pick.line ?? pick.point
+  );
+}
+
 /*
   Returns true, false, "void", or null.
   - true/false: settled win/loss.
@@ -1551,21 +1585,47 @@ function settlePick(pick, event) {
     return selected === actualResult;
   }
 
-  if (market === "totals") {
+  if (market === "totals" || market === "alternate_totals") {
     const s = normalizeText(selection);
     const total = home + away;
 
-    const match = s.match(
-      /^(over|under)\s*(\d+(?:\.\d+)?)$/
-    );
+    let line = getLine(pick);
 
-    if (!match) return null;
+    if (line === null) {
+      const match = s.match(/^(over|under)\s*(\d+(?:\.\d+)?)$/);
+      if (!match) return null;
+      line = Number(match[2]);
+    }
 
-    const line = Number(match[2]);
+    if (isQuarterLine(line)) return null;
 
-    if (match[1] === "over") return total > line;
+    const isOver = s.startsWith("over");
+    if (!isOver && !s.startsWith("under")) return null;
 
-    return total < line;
+    if (total === line) return "void";   // push on whole-number line
+
+    return isOver ? total > line : total < line;
+  }
+
+  if (market === "team_totals") {
+    const s = normalizeText(selection);
+    const line = getLine(pick);
+    const team = String(pick.description ?? pick.team ?? "").trim();
+
+    if (line === null || !team) return null;
+    if (isQuarterLine(line)) return null;
+
+    const goals =
+      normalizeText(team) === normalizeText(homeName) ? home :
+      normalizeText(team) === normalizeText(awayName) ? away :
+      null;
+
+    if (goals === null) return null;
+
+    if (s.startsWith("over")) return goals > line;
+    if (s.startsWith("under")) return goals < line;
+
+    return null;
   }
 
   if (market === "btts") {
@@ -1618,9 +1678,7 @@ function settlePick(pick, event) {
       cannot be settled as a simple win/loss, so they are
       deliberately left unsettled.
     */
-    const point = safeNumber(
-      pick.point ?? pick.point_value ?? pick.line
-    );
+    const point = getLine(pick);
 
     if (point === null) return null;
 
@@ -1662,7 +1720,6 @@ function calculateTicket(picks, scoreEvents) {
   }
 
   let totalPoints = 0;
-  let anyLoss = false;
   let allSettled = true;
 
   const updatedPicks = picks.map(original => {
@@ -1673,10 +1730,8 @@ function calculateTicket(picks, scoreEvents) {
 
     if (!eventId || !sportKey) {
       allSettled = false;
-
       pick.settlement_note =
         "Legacy selection: missing exact Odds API event ID or sport key.";
-
       return pick;
     }
 
@@ -1691,10 +1746,8 @@ function calculateTicket(picks, scoreEvents) {
 
     if (won === null) {
       allSettled = false;
-
       pick.settlement_note =
         "This market or selection could not be settled safely.";
-
       return pick;
     }
 
@@ -1703,14 +1756,9 @@ function calculateTicket(picks, scoreEvents) {
     pick.settled_at = new Date().toISOString();
 
     if (won === "void") {
-      /*
-        Push/refund: settled, contributes nothing, and does
-        not kill the ticket.
-      */
       pick.result = "void";
       pick.settlement_note =
-        "Selection void (push/refund). It contributes 0 points and does not fail the ticket.";
-
+        "Selection void (push/refund). Contributes 0 points.";
       return pick;
     }
 
@@ -1721,14 +1769,11 @@ function calculateTicket(picks, scoreEvents) {
 
       if (odds === null) {
         allSettled = false;
-
         pick.settlement_note =
           "Final result found, but saved decimal odds are missing.";
       } else {
         totalPoints += (odds - 1) * POINTS_MULTIPLIER;
       }
-    } else {
-      anyLoss = true;
     }
 
     return pick;
@@ -1742,13 +1787,31 @@ function calculateTicket(picks, scoreEvents) {
     };
   }
 
+  // ---------- card-level result: THE HOUSE RULES ----------
+  const voids  = updatedPicks.filter(p => p.result === "void").length;
+  const losses = updatedPicks.filter(p => p.result === "lost").length;
+  const wins   = updatedPicks.filter(p => p.result === "won").length;
+
+  let result;
+
+  if (voids >= 2) {
+    result = "lost";          // two voids = automatic lost card
+    totalPoints = 0;
+  } else if (losses > 0) {
+    result = "lost";          // any lost pick zeroes the card
+    totalPoints = 0;
+  } else if (wins === 0) {
+    result = "void";          // only reachable when ALL picks void
+    totalPoints = 0;
+  } else {
+    result = "win";           // 0 or 1 void excluded from judgement
+  }
+
   return {
     state: "graded",
+    result,
     picks: updatedPicks,
-    points: anyLoss
-      ? 0
-      : Math.round(totalPoints * 100) / 100,
-    anyLoss
+    points: Math.round(totalPoints * 100) / 100
   };
 }
 
@@ -1774,6 +1837,132 @@ function scoringAuthorized(req) {
 
   return supplied === SCORING_SECRET;
 }
+
+/* -------------------------------------------------------
+   CARD SUBMISSION — replaces direct browser inserts.
+
+   The browser sends the user's Supabase JWT; we verify it
+   against Supabase Auth, validate every pick against the
+   auto-settleable market list, sanitize the payload (the
+   server owns points/status/result), and insert with the
+   service role. RLS blocks user inserts, so this endpoint
+   is the ONLY way in.
+------------------------------------------------------- */
+
+async function getUserFromJwt(token) {
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY || !token) return null;
+
+  const response = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+    headers: {
+      apikey: SUPABASE_SERVICE_ROLE_KEY,
+      Authorization: `Bearer ${token}`
+    }
+  });
+
+  if (!response.ok) return null;
+
+  return response.json();
+}
+
+app.post("/api/cards", async (req, res) => {
+  try {
+    const token = String(req.get("authorization") || "")
+      .replace(/^Bearer\s+/i, "");
+
+    const user = await getUserFromJwt(token);
+
+    if (!user || !user.id) {
+      return sendError(res, 401, "Not signed in.");
+    }
+
+    const rawPicks = req.body?.picks;
+
+    if (!Array.isArray(rawPicks) || rawPicks.length === 0) {
+      return sendError(res, 400, "Card must contain at least 1 pick.");
+    }
+
+    /*
+      Keep ONLY the fields the scorer reads plus harmless
+      display labels. Anything the client sends for
+      points/status/result is discarded here.
+    */
+    const picks = rawPicks.map(p => {
+      const marketKey = getMarketKey(p);
+      const line = safeNumber(p.point_value ?? p.line ?? p.point);
+
+      return {
+        event_id: getEventId(p),
+        sport_key: getSportKey(p),
+        kickoff: p.kickoff ?? null,
+        home: String(p.home ?? p.home_team ?? ""),
+        away: String(p.away ?? p.away_team ?? ""),
+        league: String(p.league ?? ""),
+        market_key: marketKey,
+        market_name: String(p.market_name ?? marketLabel(marketKey)),
+        outcome: getSelection(p),
+        selection: String(p.selection ?? ""),
+        odds: getSavedOdds(p),
+        price: getSavedOdds(p),
+        // the line under BOTH names: legacy rows read point_value first
+        ...(line !== null ? { point: line, point_value: line } : {}),
+        // team name for team_totals — without it market 20 can't settle
+        ...(p.description ? { description: String(p.description) } : {})
+      };
+    });
+
+    for (const pick of picks) {
+      if (!pick.event_id || !pick.sport_key) {
+        return sendError(res, 400,
+          "Pick is missing event_id or sport_key.", { pick });
+      }
+
+      if (!pick.outcome) {
+        return sendError(res, 400, "Pick is missing its outcome.", { pick });
+      }
+
+      if (pick.odds === null) {
+        return sendError(res, 400, "Pick has invalid decimal odds.", { pick });
+      }
+
+      if (!SETTLEABLE_MARKET_KEYS.has(pick.market_key)) {
+        return sendError(res, 400,
+          `Market "${pick.market_key}" is display-only and is not scored.`);
+      }
+
+      if (
+        ["spreads", "alternate_spreads", "totals", "alternate_totals", "team_totals"]
+          .includes(pick.market_key) &&
+        pick.point !== undefined &&
+        isQuarterLine(pick.point)
+      ) {
+        return sendError(res, 400,
+          "Quarter lines (x.25 / x.75) are not scored — they split the stake.");
+      }
+    }
+
+    const inserted = await supabaseRequest(TABLE, {
+      method: "POST",
+      prefer: "return=representation",
+      body: {
+        user_id: user.id,
+        picks,
+        point: 0,
+        points: 0,
+        status: "pending",
+        result: null,
+        points_awarded: false
+      }
+    });
+
+    const card = Array.isArray(inserted) ? inserted[0] : inserted;
+
+    res.json({ success: true, card });
+  } catch (error) {
+    sendError(res, 500, "Could not submit card.", {
+      details: error.message
+    });
+  }
+});
 
 /* -------------------------------------------------------
    PREDICTION SCORING
@@ -1866,7 +2055,10 @@ app.post("/api/score-predictions", async (req, res) => {
             picks: outcome.picks,
             point: points,
             points,
-            status: "graded"
+            status: "graded",
+            result: outcome.result,
+            settled_at: new Date().toISOString(),
+            points_awarded: outcome.result === "win"
           }
         }
       );
@@ -1874,6 +2066,25 @@ app.post("/api/score-predictions", async (req, res) => {
       if (Array.isArray(updated) && updated.length > 0) {
         graded++;
         pointsAwarded += points;
+
+        // audit trail — never let an audit failure break scoring
+        await supabaseRequest("scoring_audit", {
+          method: "POST",
+          prefer: "return=minimal",
+          body: {
+            card_id: entry.id,
+            action: "card_settled",
+            details: {
+              result: outcome.result,
+              points,
+              picks: outcome.picks.map(p => ({
+                market: getMarketKey(p),
+                outcome: getSelection(p),
+                result: p.result ?? "pending"
+              }))
+            }
+          }
+        }).catch(() => {});
       } else {
         skipped++;
       }
@@ -1906,8 +2117,26 @@ app.post("/api/score-predictions", async (req, res) => {
 app.get("/api/leaderboard", async (req, res) => {
   try {
     const entries = await supabaseRequest(
-      `${TABLE}?status=eq.graded&select=user_id,point,points,created_at`,
+      `${TABLE}?status=eq.graded&select=user_id,result,points,settled_at`,
       { method: "GET" }
+    );
+
+    // profiles table may not exist yet — degrade gracefully
+    let profiles = [];
+
+    try {
+      profiles = await supabaseRequest("profiles?select=id,username", {
+        method: "GET"
+      });
+    } catch {
+      profiles = [];
+    }
+
+    const nameOf = new Map(
+      (Array.isArray(profiles) ? profiles : []).map(p => [
+        p.id,
+        p.username || `Player ${String(p.id).slice(0, 8)}`
+      ])
     );
 
     const totals = new Map();
@@ -1917,26 +2146,38 @@ app.get("/api/leaderboard", async (req, res) => {
 
       if (!userId) continue;
 
-      const points = safeNumber(entry.points ?? entry.point) || 0;
-
-      const existing = totals.get(userId) || {
+      const row = totals.get(userId) || {
         user_id: userId,
+        username: nameOf.get(userId) || `Player ${String(userId).slice(0, 8)}`,
+        win_cards: 0,
         points: 0,
-        tickets: 0
+        first_win_at: null
       };
 
-      existing.points += points;
-      existing.tickets += 1;
+      if (entry.result === "win") {
+        row.win_cards += 1;
+        row.points += safeNumber(entry.points) || 0;
 
-      totals.set(userId, existing);
+        // earliest winning card breaks ties
+        if (!row.first_win_at || entry.settled_at < row.first_win_at) {
+          row.first_win_at = entry.settled_at;
+        }
+      }
+
+      totals.set(userId, row);
     }
 
     const leaderboard = Array.from(totals.values())
       .map(row => ({
-        ...row,
+        username: row.username,
+        win_cards: row.win_cards,
         points: Math.round(row.points * 100) / 100
       }))
-      .sort((a, b) => b.points - a.points)
+      .sort((a, b) =>
+        b.points - a.points ||
+        b.win_cards - a.win_cards ||
+        new Date(a.first_win_at) - new Date(b.first_win_at)
+      )
       .map((row, index) => ({
         rank: index + 1,
         ...row
@@ -1966,3 +2207,4 @@ app.listen(PORT, () => {
   console.log(`Nigeria prediction date: ${todayNigeria()}`);
 });
   
+ 
