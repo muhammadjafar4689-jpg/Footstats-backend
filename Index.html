@@ -70,6 +70,9 @@ label{display:block;font-size:12px;color:var(--muted);margin:10px 0 5px}
 .unavail{font-size:12px;color:var(--muted);padding:6px 0;line-height:1.5}
 footer{text-align:center;padding:25px;color:var(--muted);font-size:11px}
 [hidden]{display:none!important}
+.notscored-badge{font-size:9px;background:#5a4a20;color:#ffd479;border:1px solid #8a6d1f;border-radius:4px;padding:1px 5px;vertical-align:middle;letter-spacing:.4px}
+.notscored-note{font-size:11px;color:var(--muted);padding:0 10px 12px;line-height:1.5}
+.not-scored h3{opacity:.75}
 @media(min-width:650px){.matchgrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.matchgrid .match{margin:0 0 10px}}
 </style>
 </head>
@@ -81,7 +84,7 @@ footer{text-align:center;padding:25px;color:var(--muted);font-size:11px}
 
 <nav>
   <button class="active" data-page="matches">Matches</button>
-  <button data-page="slip">My Slip <span id="slipCount">0</span>/15</button>
+  <button data-page="slip">My Slip (<span id="slipCount">0</span>)</button>
   <button data-page="leaderboard">Leaderboard</button>
   <button data-page="account">Account</button>
 </nav>
@@ -89,7 +92,7 @@ footer{text-align:center;padding:25px;color:var(--muted);font-size:11px}
 <main>
   <section id="page-matches">
     <h1>Prediction Challenge</h1>
-    <p class="small">Choose 15 different matches. Predictions close when each match kicks off. Times are shown in Nigeria time.</p>
+    <p class="small">Pick any number of today's matches. Predictions close when each match kicks off. Times are shown in Nigeria time.</p>
     <div id="dates"></div>
 
     <div class="panel">
@@ -131,19 +134,20 @@ footer{text-align:center;padding:25px;color:var(--muted);font-size:11px}
   <section id="page-slip" hidden>
     <h1>My Prediction Slip</h1>
     <div class="notice">
-      Select exactly 15 different matches to submit. Each winning pick contributes
-      (decimal odds − 1) × 100 potential points. A losing pick makes the ticket score zero.
+      Add at least one pick to submit. Each winning pick contributes
+      (decimal odds − 1) × 100 points. A losing pick makes the ticket score zero.
+      Void (push) picks are excluded — but two voids on one ticket make it a loss.
       Actual points are calculated by your backend after results become available.
     </div>
     <div id="slip" class="panel"></div>
     <div class="panel">
       <div class="stats">
-        <div class="stat"><strong id="pickTotal">0/15</strong><span>Matches selected</span></div>
+        <div class="stat"><strong id="pickTotal">0</strong><span>Picks in slip</span></div>
         <div class="stat"><strong id="potentialPoints">0</strong><span>Potential points</span></div>
         <div class="stat"><strong id="ticketStatus">Draft</strong><span>Ticket status</span></div>
       </div>
-      <button class="btn primary" id="submitSlip" style="width:100%;margin-top:14px">Submit 15-match prediction</button>
-      <div id="slipMessage" class="notice">Sign in and select 15 different matches to submit.</div>
+      <button class="btn primary" id="submitSlip" style="width:100%;margin-top:14px">Submit prediction</button>
+      <div id="slipMessage" class="notice">Sign in and add at least one pick to submit.</div>
     </div>
   </section>
 
@@ -169,6 +173,14 @@ footer{text-align:center;padding:25px;color:var(--muted);font-size:11px}
         </div>
       </div>
       <button class="btn" id="signOut" hidden>Sign out</button>
+      <div id="usernameBlock" hidden style="margin-top:14px">
+        <label for="usernameInput">Username (shown on the leaderboard)</label>
+        <div class="row">
+          <input id="usernameInput" maxlength="24" placeholder="Pick a username" style="flex:1">
+          <button class="btn primary" id="saveUsername">Save</button>
+        </div>
+        <div id="usernameMessage" class="notice" style="margin-top:8px"></div>
+      </div>
       <div id="authMessage" class="notice"></div>
     </div>
   </section>
@@ -182,7 +194,6 @@ const API="https://footstats-backend-d4kc.onrender.com";
 const SUPABASE_URL="https://hjkjoqkkwaoysyazhanu.supabase.co";
 const SUPABASE_KEY="sb_publishable_3Nj_jPws61KzG108Oh9Q0w_Pox81pKW";
 const TZ="Africa/Lagos";
-const MAX_PICKS=15;
 const db=window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
 
 let user=null;
@@ -246,6 +257,24 @@ const MARKET_SECTIONS=[
 ];
 const THREE_COL_MARKETS=new Set(["h2h","h2h_3_way","h2h_3_way_h1","h2h_3_way_h2","corners_1x2"]);
 const H2H_LIKE_MARKETS=new Set(["h2h","h2h_3_way","h2h_3_way_h1","h2h_3_way_h2"]);
+
+/*
+  OPTION B — markets The Odds API /scores can NEVER settle (it returns
+  full-time goals only: no half-time, corners, cards or fouls). They
+  are shown for browsing but their picks are disabled. Keys match
+  server.js SETTLEABLE_MARKET_KEYS exactly.
+*/
+const UNSCORABLE_MARKETS=new Set([
+  "double_chance_h1","halftime_fulltime","h2h_3_way_h1","h2h_3_way_h2",
+  "btts_h1","btts_h2","correct_score_h1",
+  "totals_h1","totals_h2","team_totals_h1","team_totals_h2",
+  "alternate_totals_corners","alternate_spreads_corners",
+  "alternate_team_totals_corners","corners_1x2",
+  "alternate_totals_cards","alternate_spreads_cards",
+  "player_shots","player_shots_on_target"
+]);
+const LINE_MARKETS=new Set(["spreads","alternate_spreads","totals","alternate_totals","team_totals"]);
+function isQuarterLineUI(p){return p!=null&&Math.abs(Number(p)*4)%2===1}
 
 let detailEvent=null;
 let detailState="idle";
@@ -359,7 +388,9 @@ function normalizeMarkets(item){
       for(const outcome of (m.outcomes||[])){
         const price=safePrice(outcome.price);
         if(price&&!existing.outcomes.some(x=>
-          x.name===outcome.name&&String(x.point??"")===String(outcome.point??"")
+          x.name===outcome.name&&
+          String(x.point??"")===String(outcome.point??"")&&
+          String(x.description??"")===String(outcome.description??"")
         )){
           existing.outcomes.push({...outcome,price});
         }
@@ -403,7 +434,7 @@ function normalizeEvent(item,sport){
   };
 }
 function selectionId(e,key,o){
-  return [e.sport_key,e.id,key,String(o.name),String(o.point??"")].join("|");
+  return [e.sport_key,e.id,key,String(o.name),String(o.point??""),String(o.description??"")].join("|");
 }
 function outcomeLabel(o,e,key){
   if(H2H_LIKE_MARKETS.has(key)){
@@ -437,9 +468,6 @@ function addPick(e,key,o){
   }else{
     if(existing){
       slip=slip.filter(p=>!(p.event_id===e.id&&p.sport_key===e.sport_key));
-    }else if(slip.length>=MAX_PICKS){
-      alert("Your slip already contains 15 different matches. Remove a selection before adding another.");
-      return;
     }
 
     slip.push({
@@ -455,6 +483,7 @@ function addPick(e,key,o){
       outcome:String(o.name),
       selection:outcomeLabel(o,e,key),
       point:o.point??null,
+      description:o.description??null,
       price,
       odds:price,
       potential_points:points(price)
@@ -488,11 +517,18 @@ function renderOdds(e){
     return `<div class="empty">No ${escapeHTML(key)} odds returned for this match.</div>`;
   }
 
-  const canPick=dateEligible(e);
-  const current=selectedForEvent(e);
   const outcomes=m.outcomes.filter(o=>safePrice(o.price));
   if(!outcomes.length)return `<div class="empty">Valid odds are unavailable.</div>`;
 
+  // Option B: unscorable markets and quarter lines are display-only
+  const anyQuarter=LINE_MARKETS.has(key)&&outcomes.some(o=>isQuarterLineUI(o.point));
+  const notScored=UNSCORABLE_MARKETS.has(key)||anyQuarter;
+  if(notScored){
+    return `<div class="notscored-note">\u26d4 <strong>Not scored</strong> — ${escapeHTML(m.market_name||key)} cannot be settled automatically, so picks here are disabled.</div>`;
+  }
+
+  const canPick=dateEligible(e);
+  const current=selectedForEvent(e);
   const cls=key==="h2h"?"odds":"otheroutcomes";
   return `<div class="${cls}">${outcomes.map(o=>{
     const price=safePrice(o.price);
@@ -506,6 +542,7 @@ function renderOdds(e){
       data-key="${escapeHTML(key)}"
       data-outcome="${escapeHTML(o.name)}"
       data-point="${escapeHTML(o.point??"")}"
+      data-description="${escapeHTML(o.description??"")}"
       ${canPick?"":"disabled"}
       title="${canPick?"Select this outcome":"Picks are closed for this match"}">
       ${escapeHTML(label+line)}
@@ -562,7 +599,9 @@ function renderMatches(){
     const key=btn.dataset.key;
     const m=e?.markets?.[key];
     const o=m?.outcomes?.find(x=>
-      String(x.name)===btn.dataset.outcome&&String(x.point??"")===btn.dataset.point
+      String(x.name)===btn.dataset.outcome&&
+      String(x.point??"")===btn.dataset.point&&
+      String(x.description??"")===String(btn.dataset.description??"")
     );
     if(e&&o)addPick(e,key,o);
   }));
@@ -619,7 +658,7 @@ function closeDetail(){
   document.getElementById("detail").hidden=true;
   renderMatches();
 }
-function detailOutcomeButtons(e,key,m){
+function detailOutcomeButtons(e,key,m,notScored=false){
   const canPick=dateEligible(e);
   const current=selectedForEvent(e);
   const outcomes=(m.outcomes||[]).filter(o=>safePrice(o.price));
@@ -631,13 +670,20 @@ function detailOutcomeButtons(e,key,m){
     const label=outcomeLabel(o,e,key)+outcomeLine(o);
     const id=selectionId(e,key,o);
     const isSelected=current?.selection_id===id;
+    const quarter=isQuarterLineUI(o.point);
+    const disabled=!canPick||notScored||quarter;
+    const title=!canPick?"Picks are closed for this match"
+      :notScored?"This market is display-only and is not scored"
+      :quarter?"Not scored — quarter lines split the stake"
+      :"Select this outcome";
     return `<button class="${isSelected?"selected":""}"
       data-dpick="1"
       data-key="${escapeHTML(key)}"
       data-outcome="${escapeHTML(o.name)}"
       data-point="${escapeHTML(o.point??"")}"
-      ${canPick?"":"disabled"}
-      title="${canPick?"Select this outcome":"Picks are closed for this match"}">
+      data-description="${escapeHTML(o.description??"")}"
+      ${disabled?"disabled":""}
+      title="${title}">
       ${escapeHTML(label)}
       <strong>${price.toFixed(2)}</strong>
       <span class="small">${points(price)} potential pts</span>
@@ -654,8 +700,9 @@ function renderDetailMarket(e,def){
   const m=e.markets?.[def.key];
 
   if(m&&Array.isArray(m.outcomes)&&m.outcomes.length){
-    return `<div class="mblock"><h3>${escapeHTML(def.name)}</h3>
-      ${detailOutcomeButtons(e,def.key,m)}
+    const notScored=UNSCORABLE_MARKETS.has(def.key);
+    return `<div class="mblock${notScored?" not-scored":""}"><h3>${escapeHTML(def.name)}${notScored?' <span class="notscored-badge">NOT SCORED — display only</span>':""}</h3>
+      ${detailOutcomeButtons(e,def.key,m,notScored)}
     </div>`;
   }
 
@@ -702,7 +749,9 @@ function showDetail(){
       const key=btn.dataset.key;
       const m=detailEvent?.markets?.[key];
       const o=m?.outcomes?.find(x=>
-        String(x.name)===btn.dataset.outcome&&String(x.point??"")===btn.dataset.point
+        String(x.name)===btn.dataset.outcome&&
+        String(x.point??"")===btn.dataset.point&&
+        String(x.description??"")===String(btn.dataset.description??"")
       );
       if(detailEvent&&o){
         addPick(detailEvent,key,o);
@@ -784,11 +833,11 @@ async function loadMatches(){
 }
 function renderSlip(){
   document.getElementById("slipCount").textContent=slip.length;
-  document.getElementById("pickTotal").textContent=slip.length+"/"+MAX_PICKS;
+  document.getElementById("pickTotal").textContent=slip.length;
   document.getElementById("potentialPoints").textContent=
     slip.reduce((n,p)=>n+Number(p.potential_points||0),0);
   document.getElementById("ticketStatus").textContent=
-    slip.length===MAX_PICKS?"Ready":slip.length?"Incomplete":"Empty";
+    slip.length?"Ready":"Empty";
 
   const box=document.getElementById("slip");
   if(!slip.length){
@@ -817,10 +866,11 @@ function renderSlip(){
   const button=document.getElementById("submitSlip");
 
   if(!user)msg.textContent="Sign in to submit your prediction.";
-  else if(slip.length<MAX_PICKS)msg.textContent=`Choose ${MAX_PICKS-slip.length} more different match(es) to complete your slip.`;
-  else msg.textContent="Your slip has 15 different matches and is ready for submission.";
+  else if(slip.length===0)msg.textContent="Add at least one pick from today's matches.";
+  else msg.textContent="Your slip is ready to submit.";
 
-  button.disabled=!user||slip.length!==MAX_PICKS||submitting;
+  button.textContent=`Submit prediction (${slip.length} pick${slip.length===1?"":"s"})`;
+  button.disabled=!user||slip.length===0||submitting;
 }
 async function checkUser(){
   const {data,error}=await db.auth.getSession();
@@ -834,6 +884,26 @@ function updateAccount(){
     user?"Signed in as "+(user.email||"your account"):"You are not signed in.";
   document.getElementById("authForm").hidden=!!user;
   document.getElementById("signOut").hidden=!user;
+  document.getElementById("usernameBlock").hidden=!user;
+  if(user)loadProfile();
+}
+async function loadProfile(){
+  if(!user)return;
+  const {data}=await db.from("profiles").select("username").eq("id",user.id).single();
+  document.getElementById("usernameInput").value=data?.username||"";
+}
+async function saveUsername(){
+  const msg=document.getElementById("usernameMessage");
+  const username=document.getElementById("usernameInput").value.trim();
+  if(username.length<3){msg.textContent="Minimum 3 characters.";msg.className="notice error";return}
+  const {error}=await db.from("profiles").update({username}).eq("id",user.id);
+  if(error){
+    msg.textContent=error.message||"Could not save username.";
+    msg.className="notice error";
+  }else{
+    msg.textContent="Saved — the leaderboard will show this name.";
+    msg.className="notice success";
+  }
 }
 async function authAction(type){
   const email=document.getElementById("email").value.trim();
@@ -877,13 +947,13 @@ async function submitSlip(){
 
   if(submitting)return;
   if(!user){msg.textContent="Sign in first.";return}
-  if(slip.length!==MAX_PICKS){
-    msg.textContent=`You must select exactly ${MAX_PICKS} different matches.`;
+  if(slip.length===0){
+    msg.textContent="Add at least one pick to your slip.";
     return;
   }
 
   const eventKeys=slip.map(p=>p.sport_key+"|"+p.event_id);
-  if(new Set(eventKeys).size!==MAX_PICKS){
+  if(new Set(eventKeys).size!==slip.length){
     msg.textContent="Your slip contains duplicate matches. Remove duplicates before submitting.";
     return;
   }
@@ -905,47 +975,30 @@ async function submitSlip(){
   msg.textContent="Submitting your prediction...";
 
   try{
-    /*
-      Keep the existing Supabase table contract:
-      user_id, picks, point, points, status.
-      Preserve the Odds API event ID and sport key for settlement.
-    */
-    const payload={
-      user_id:user.id,
-      picks:slip.map(p=>({
-        event_id:p.event_id,
-        sport_key:p.sport_key,
-        kickoff:p.kickoff,
-        home_team:p.home_team,
-        away_team:p.away_team,
-        league:p.league,
-        market_key:p.market_key,
-        market_name:p.market_name,
-        outcome:p.outcome,
-        selection:p.selection,
-        price:Number(p.price),
-        odds:Number(p.price),
-        point:Number(p.potential_points),
-        points:Number(p.potential_points),
-        point_value:p.point
-      })),
-      point:0,
-      points:0,
-      status:"pending"
-    };
+    const {data:{session}}=await db.auth.getSession();
+    if(!session)throw Error("Your session expired. Sign in again.");
 
-    const {data,error}=await db
-      .from("prediction_entries")
-      .insert(payload)
-      .select();
+    // Server-side submission: the backend verifies the JWT, validates
+    // every pick, and forces points=0 / status=pending. Never trust
+    // the browser with points.
+    const res=await fetch(API+"/api/cards",{
+      method:"POST",
+      headers:{
+        "Content-Type":"application/json",
+        "Authorization":"Bearer "+session.access_token
+      },
+      body:JSON.stringify({picks:slip})
+    });
 
-    if(error)throw error;
+    const out=await res.json().catch(()=>({}));
+    if(!res.ok||out.success===false){
+      throw Error(out.error||("HTTP "+res.status));
+    }
 
     msg.innerHTML='<span class="success">Prediction submitted successfully!</span> Your ticket is saved and awaiting scoring.';
     slip=[];
     renderSlip();
     renderMatches();
-    await loadLeaderboard();
   }catch(err){
     msg.innerHTML=`<span class="error">Could not submit:</span> ${escapeHTML(err.message||"Please try again.")}`;
   }finally{
@@ -966,18 +1019,21 @@ async function loadLeaderboard(){
       return;
     }
 
-    box.innerHTML=rows.map((r,i)=>{
-      const rank=r.rank??i+1;
-      const pointsValue=Number(r.points??r.point??0);
-      const tickets=Number(r.tickets??r.ticket_count??0);
-      const name=r.display_name||r.username||r.name||
-        (r.user_id?"Player "+String(r.user_id).slice(0,8):"Player");
-      return `<div class="pickhead" style="padding:12px 0;border-bottom:1px solid var(--border)">
-        <span><strong>#${escapeHTML(rank)}</strong> ${escapeHTML(name)}</span>
-        <span><strong class="success">${Number.isFinite(pointsValue)?pointsValue:0} pts</strong>
-        <span class="small"> · ${Number.isFinite(tickets)?tickets:0} tickets</span></span>
-      </div>`;
-    }).join("");
+    box.innerHTML=`
+      <div class="pickhead" style="padding:6px 2px;font-size:11px;color:var(--muted)">
+        <span>Rank · Player</span><span>Win cards · Points</span>
+      </div>`+
+      rows.map(r=>{
+        const rank=r.rank??"?";
+        const name=r.username||r.display_name||r.name||
+          (r.user_id?"Player "+String(r.user_id).slice(0,8):"Player");
+        const winCards=Number(r.win_cards??0);
+        const pts=Number(r.points??0);
+        return `<div class="pickhead" style="padding:12px 0;border-bottom:1px solid var(--border)">
+          <span><strong>#${escapeHTML(rank)}</strong> ${escapeHTML(name)}</span>
+          <span><strong class="success">${winCards}</strong> win card${winCards===1?"":"s"} · <strong>${pts}</strong> pts</span>
+        </div>`;
+      }).join("");
   }catch(err){
     box.innerHTML=`<div class="empty error">Leaderboard unavailable: ${escapeHTML(err.message)}</div>`;
   }
@@ -1014,6 +1070,7 @@ document.getElementById("signOut").addEventListener("click",async()=>{
   document.getElementById("authMessage").textContent="You have signed out.";
 });
 document.getElementById("submitSlip").addEventListener("click",submitSlip);
+document.getElementById("saveUsername").addEventListener("click",saveUsername);
 document.getElementById("detailClose").addEventListener("click",closeDetail);
 document.getElementById("detail").addEventListener("click",ev=>{
   if(ev.target===ev.currentTarget)closeDetail();
@@ -1035,4 +1092,4 @@ loadMatches();
 </script>
 </body>
 </html>
- 
+  
