@@ -940,10 +940,10 @@ async function authAction(type){
     document.getElementById("signIn").disabled=false;
     document.getElementById("signUp").disabled=false;
   }
-}
 async function submitSlip(){
   const msg=document.getElementById("slipMessage");
   const button=document.getElementById("submitSlip");
+  let submissionSucceeded=false;
 
   if(submitting)return;
   if(!user){msg.textContent="Sign in first.";return}
@@ -978,9 +978,6 @@ async function submitSlip(){
     const {data:{session}}=await db.auth.getSession();
     if(!session)throw Error("Your session expired. Sign in again.");
 
-    // Server-side submission: the backend verifies the JWT, validates
-    // every pick, and forces points=0 / status=pending. Never trust
-    // the browser with points.
     const res=await fetch(API+"/api/cards",{
       method:"POST",
       headers:{
@@ -992,20 +989,24 @@ async function submitSlip(){
 
     const out=await res.json().catch(()=>({}));
     if(!res.ok||out.success===false){
-      throw Error(out.error||("HTTP "+res.status));
+      throw Error(out.error||out.message||("HTTP "+res.status));
     }
 
-    msg.innerHTML='<span class="success">Prediction submitted successfully!</span> Your ticket is saved and awaiting scoring.';
+    submissionSucceeded=true;
     slip=[];
-    renderSlip();
     renderMatches();
+
   }catch(err){
     msg.innerHTML=`<span class="error">Could not submit:</span> ${escapeHTML(err.message||"Please try again.")}`;
   }finally{
     submitting=false;
     renderSlip();
+
+    if(submissionSucceeded){
+      msg.innerHTML='<span class="success">Prediction submitted successfully!</span> Your ticket is saved and awaiting scoring.';
+    }
   }
-}
+  } 
 async function loadLeaderboard(){
   const box=document.getElementById("ranks");
   box.innerHTML='<div class="empty">Loading leaderboard...</div>';
