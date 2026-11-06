@@ -2125,7 +2125,7 @@ app.get("/api/leaderboard", async (req, res) => {
     let profiles = [];
 
     try {
-      profiles = await supabaseRequest("profiles?select=id,username", {
+      profiles = await supabaseRequest("profiles?select=user_id,username", {
         method: "GET"
       });
     } catch {
@@ -2134,8 +2134,8 @@ app.get("/api/leaderboard", async (req, res) => {
 
     const nameOf = new Map(
       (Array.isArray(profiles) ? profiles : []).map(p => [
-        p.id,
-        p.username || `Player ${String(p.id).slice(0, 8)}`
+        p.user_id,
+        p.username || `Player ${String(p.user_id).slice(0, 8)}`
       ])
     );
 
