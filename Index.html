@@ -896,7 +896,25 @@ async function saveUsername(){
   const msg=document.getElementById("usernameMessage");
   const username=document.getElementById("usernameInput").value.trim();
   if(username.length<3){msg.textContent="Minimum 3 characters.";msg.className="notice error";return}
-  const {error}=await db.from("profiles").update({username}).eq("id",user.id);
+   const {data: existing,error: checkError}=await db
+  .from("profiles")
+  .select("user_id")
+  .ilike("username",username)
+  .neq("user_id",user.id)
+  .limit(1);
+
+if(checkError){
+  msg.textContent="Could not check username availability.";
+  msg.className="notice error";
+  return;
+}
+
+if(existing && existing.length>0){
+  msg.textContent="Username already taken. Please choose another.";
+  msg.className="notice error";
+  return;
+  }                                                                      
+  const {error}=await db.from("profiles").update({username}).eq("user_id",user.id);
   if(error){
     msg.textContent=error.message||"Could not save username.";
     msg.className="notice error";
