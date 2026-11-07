@@ -2140,6 +2140,19 @@ app.get("/api/leaderboard", async (req, res) => {
     );
 
     const totals = new Map();
+     // Add every registered user, even with zero wins and points.
+for (const profile of profiles || []) {
+  if (!profile.user_id) continue;
+
+  totals.set(profile.user_id, {
+    user_id: profile.user_id,
+    username: profile.username ||
+      `Player ${String(profile.user_id).slice(0, 8)}`,
+    win_cards: 0,
+    points: 0,
+    first_win_at: null
+  });
+}
 
     for (const entry of entries || []) {
       const userId = entry.user_id;
