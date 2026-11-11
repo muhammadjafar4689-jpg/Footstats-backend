@@ -1303,13 +1303,18 @@ app.get("/api/fixtures", async (req, res) => {
 
     let freshEnough = false;
 
-    if (Array.isArray(rows) && rows.length) {
-      const oldest = Math.min(
-        ...rows.map(r => new Date(r.fetched_at).getTime())
-      );
+    const competitionsToRefresh = ACTIVE_COMPETITIONS.filter(sport => {
+  const marker = rows.find(r =>
+    r.sport_key === sport.key &&
+    r.payload?.cache_marker === true
+  );
 
-      freshEnough = (Date.now() - oldest) < refreshMs;
-    }
+  if (!marker) return true;
+
+  return (Date.now() - new Date(marker.fetched_at).getTime()) >= refreshMs;
+});
+
+freshEnough = competitionsToRefresh.length === 0; 
 
     const fetchErrors = [];
 
@@ -1317,19 +1322,28 @@ app.get("/api/fixtures", async (req, res) => {
       const bounds = nigeriaBoundsForDate(date);
 
       const results = await mapWithConcurrency(
-        ACTIVE_COMPETITIONS,
+       competitionsToRefresh,
         FIXTURES_CONCURRENCY,
         sport => fetchCompetitionFixturesForRange(sport, bounds)
       );
 
       const fetched = [];
+       const cacheMarkers = [];
 
       for (let i = 0; i < results.length; i++) {
         if (results[i].status === "fulfilled") {
-          fetched.push(...results[i].value.matches);
-        } else {
+  fetched.push(...results[i].value.matches);
+
+  cacheMarkers.push({
+    event_id: `__cache_marker__${date}__${competitionsToRefresh[i].key}`,
+    sport_key: competitionsToRefresh[i].key,
+    fixture_date: date,
+    fetched_at: new Date().toISOString(),
+    payload: { cache_marker: true }
+  });
+}  else {
           fetchErrors.push({
-            competition: ACTIVE_COMPETITIONS[i].key,
+            competition: competition: competitionsToRefresh[i].key,
             error: results[i].reason?.message || "Request failed"
           });
         }
@@ -1353,19 +1367,12 @@ app.get("/api/fixtures", async (req, res) => {
         unique.push(m);
       }
 
-      if (unique.length) {
+      if (unique.length || cacheMarkers.length) {
         await supabaseRequest(
           `fixtures_cache?on_conflict=event_id,sport_key`,
           {
             method: "POST",
-            prefer: "resolution=merge-duplicates,return=minimal",
-            body: unique.map(m => ({
-              event_id: m.event_id,
-              sport_key: m.sport_key,
-              fixture_date: date,
-              fetched_at: new Date().toISOString(),
-              payload: { ...m, fixture_date: date }
-            }))
+            prefer: "resolution=merge-du                       }
           }
         );
       }
