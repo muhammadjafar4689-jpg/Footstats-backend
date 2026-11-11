@@ -1215,12 +1215,9 @@ app.get("/api/odds", async (req, res) => {
    12h; future dates re-fetch if older than 48h. Point your
    cron at /api/fixtures (no date) once a day at ~05:00
    Nigeria time to pre-warm today.
-------------------------------------------------------- */
-
-length) {
-  await supabaseRequest(
-    `fixtures_cache?on_conflict=event_id,sport_key`,
-    {async function fetchCompetitionFixturesForRange(sport, bounds) {
+  ------------------------------------------------------ */
+async function fetchCompetitionFixturesForRange(sport, bounds) { 
+    
   const result = await oddsRequest(
     `/sports/${encodeURIComponent(sport.key)}/odds`,
     {
