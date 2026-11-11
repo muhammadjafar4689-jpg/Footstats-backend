@@ -1217,7 +1217,10 @@ app.get("/api/odds", async (req, res) => {
    Nigeria time to pre-warm today.
 ------------------------------------------------------- */
 
-async function fetchCompetitionFixturesForRange(sport, bounds) {
+length) {
+  await supabaseRequest(
+    `fixtures_cache?on_conflict=event_id,sport_key`,
+    {async function fetchCompetitionFixturesForRange(sport, bounds) {
   const result = await oddsRequest(
     `/sports/${encodeURIComponent(sport.key)}/odds`,
     {
@@ -1304,14 +1307,10 @@ app.get("/api/fixtures", async (req, res) => {
     let freshEnough = false;
 
     const competitionsToRefresh = ACTIVE_COMPETITIONS.filter(sport => {
-  const marker = rows.find(r =>
+  return !rows.some(r =>
     r.sport_key === sport.key &&
     r.payload?.cache_marker === true
   );
-
-  if (!marker) return true;
-
-  return (Date.now() - new Date(marker.fetched_at).getTime()) >= refreshMs;
 });
 
 freshEnough = competitionsToRefresh.length === 0; 
@@ -1367,10 +1366,7 @@ freshEnough = competitionsToRefresh.length === 0;
         unique.push(m);
       }
 
-      if (unique.length || cacheMarkers.length) {
-  await supabaseRequest(
-    `fixtures_cache?on_conflict=event_id,sport_key`,
-    {
+      if (unique.length || cacheMarkers.
       method: "POST",
       prefer: "resolution=merge-duplicates,return=minimal",
       body: [
@@ -1387,11 +1383,11 @@ freshEnough = competitionsToRefresh.length === 0;
   );
 }
 
-      // prune fixtures older than 3 days
-      await supabaseRequest(
-        `fixtures_cache?fixture_date=lt.${shiftNigeriaDate(today, -3)}`,
-        { method: "DELETE", prefer: "return=minimal" }
-      ).catch(() => {});
+      // Delete previous days' fixtures and cache markers
+await supabaseRequest(
+  `fixtures_cache?fixture_date=lt.${today}`,
+  { method: "DELETE", prefer: "return=minimal" }
+).catch(() => {});
 
       rows = await supabaseRequest(
         `fixtures_cache?fixture_date=eq.${date}&select=event_id,sport_key,payload,fetched_at`,
