@@ -1343,7 +1343,7 @@ freshEnough = competitionsToRefresh.length === 0;
   });
 }  else {
           fetchErrors.push({
-            competition: competition: competitionsToRefresh[i].key,
+            competition: competitionsToRefresh[i].key,
             error: results[i].reason?.message || "Request failed"
           });
         }
@@ -1368,14 +1368,24 @@ freshEnough = competitionsToRefresh.length === 0;
       }
 
       if (unique.length || cacheMarkers.length) {
-        await supabaseRequest(
-          `fixtures_cache?on_conflict=event_id,sport_key`,
-          {
-            method: "POST",
-            prefer: "resolution=merge-du                       }
-          }
-        );
-      }
+  await supabaseRequest(
+    `fixtures_cache?on_conflict=event_id,sport_key`,
+    {
+      method: "POST",
+      prefer: "resolution=merge-duplicates,return=minimal",
+      body: [
+        ...unique.map(m => ({
+          event_id: m.event_id,
+          sport_key: m.sport_key,
+          fixture_date: date,
+          fetched_at: new Date().toISOString(),
+          payload: { ...m, fixture_date: date }
+        })),
+        ...cacheMarkers
+      ]
+    }
+  );
+}
 
       // prune fixtures older than 3 days
       await supabaseRequest(
@@ -1393,6 +1403,7 @@ freshEnough = competitionsToRefresh.length === 0;
     const matches = [];
 
     for (const r of (Array.isArray(rows) ? rows : [])) {
+  if (r.payload?.cache_marker) continue; 
       const k = `${r.sport_key}|${r.event_id}`;
 
       if (seen.has(k)) continue;
