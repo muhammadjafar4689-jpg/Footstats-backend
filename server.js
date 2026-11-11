@@ -315,39 +315,76 @@ function sendApiError(res, error) {
     ...(error.quota ? { quota: error.quota } : {})
   });
 }
-
 async function supabaseRequest(path, options = {}) {
-     if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-    throw new Error(
-      "Supabase is not configured. Check SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in Render."
-    );
-  }
+if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+throw new Error(
+"Supabase is not configured. Check SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in Render."
+);
+}
+
+const url = "${SUPABASE_URL}/rest/v1/${path}";
+
+const response = await fetch(url, {
+method: options.method || "GET",
+
+headers: {
+  apikey: SUPABASE_SERVICE_ROLE_KEY,
+  Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+  "Content-Type": "application/json",
+  Prefer: options.prefer || "return=representation",
+  ...(options.headers || {})
+},
+
+body: options.body === undefined
+  ? undefined
+  : JSON.stringify(options.body)
+
+});
+
+const text = await response.text();
+
+let data;
+
+try {
+data = text ? JSON.parse(text) : null;
+} catch {
+data = text;
+}
+
+if (!response.ok) {
+throw new Error(
+"Supabase HTTP ${response.status}: ${ typeof data === "string" ? data : JSON.stringify(data) }"
+);
+}
+
+return data;
+}
+
 function getNigeriaMarketCacheDay() {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Africa/Lagos",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit"
-  }).formatToParts(new Date());
+const parts = new Intl.DateTimeFormat("en-CA", {
+timeZone: "Africa/Lagos",
+year: "numeric",
+month: "2-digit",
+day: "2-digit"
+}).formatToParts(new Date());
 
-  const values = {};
-  for (const part of parts) {
-    values[part.type] = part.value;
-  }
+const values = {};
 
-  const today = `${values.year}-${values.month}-${values.day}`;
+for (const part of parts) {
+values[part.type] = part.value;
+}
 
-  const start = new Date(`${today}T00:00:00+01:00`);
-  const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+const today = "${values.year}-${values.month}-${values.day}";
 
-  return {
-    start: start.toISOString(),
-    end: end.toISOString()
-  };
+const start = new Date("${today}T00:00:00+01:00");
+const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+
+return {
+start: start.toISOString(),
+end: end.toISOString()
+};
 } 
-  const url = `${SUPABASE_URL}/rest/v1/${path}`;
-
-  const response = await fetch(url, {
+const response = await fetch(url, {
     method: options.method || "GET",
 
     headers: {
