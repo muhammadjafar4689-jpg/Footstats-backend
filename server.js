@@ -1093,9 +1093,9 @@ const ACTIVE_COMPETITIONS = (process.env.ACTIVE_COMPETITIONS
   name: (COMPETITIONS.find(c => c.key === key) || { name: key }).name
 }));
 
-const TODAY_CACHE_REFRESH_MS = 12 * 60 * 60 * 1000;
+const TODAY_CACHE_REFRESH_MS = 24 * 60 * 60 * 1000;
 const FUTURE_CACHE_REFRESH_MS = 48 * 60 * 60 * 1000;
-const MAX_FUTURE_DAYS = 13;
+const MAX_FUTURE_DAYS = 0;
 
 app.get("/api/odds/sports", (req, res) => {
   res.json({
