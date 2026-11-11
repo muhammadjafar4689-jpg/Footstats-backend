@@ -1363,7 +1363,10 @@ freshEnough = competitionsToRefresh.length === 0;
         unique.push(m);
       }
 
-      if (unique.length || cacheMarkers.
+      if (unique.length || cacheMarkers.length) {
+  await supabaseRequest(
+    `fixtures_cache?on_conflict=event_id,sport_key`,
+    {
       method: "POST",
       prefer: "resolution=merge-duplicates,return=minimal",
       body: [
@@ -1378,7 +1381,7 @@ freshEnough = competitionsToRefresh.length === 0;
       ]
     }
   );
-}
+     } 
 
       // Delete previous days' fixtures and cache markers
 await supabaseRequest(
