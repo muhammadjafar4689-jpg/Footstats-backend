@@ -317,12 +317,34 @@ function sendApiError(res, error) {
 }
 
 async function supabaseRequest(path, options = {}) {
-  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+     if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
     throw new Error(
       "Supabase is not configured. Check SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY in Render."
     );
   }
+function getNigeriaMarketCacheDay() {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Africa/Lagos",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(new Date());
 
+  const values = {};
+  for (const part of parts) {
+    values[part.type] = part.value;
+  }
+
+  const today = `${values.year}-${values.month}-${values.day}`;
+
+  const start = new Date(`${today}T00:00:00+01:00`);
+  const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+
+  return {
+    start: start.toISOString(),
+    end: end.toISOString()
+  };
+} 
   const url = `${SUPABASE_URL}/rest/v1/${path}`;
 
   const response = await fetch(url, {
@@ -910,8 +932,42 @@ app.get("/api/match-markets", async (req, res) => {
         "Required: sport and eventId. Example: /api/match-markets?sport=soccer_epl&eventId=EVENT_ID"
       );
     }
+     const marketCacheDay = getNigeriaMarketCacheDay();
 
-    const cacheKey = `${sport}|${eventId}|${regions}`;
+const cacheKey = `${sport}|${eventId}|${regions}|${marketCacheDay.start}`;
+
+try {
+  const query = new URLSearchParams({
+    select: "payload",
+    event_id: `eq.${eventId}`,
+    sport_key: `eq.${sport}`,
+    regions: `eq.${regions}`,
+    and: `(fetched_at.gte.${marketCacheDay.start},fetched_at.lt.${marketCacheDay.end})`
+  });
+
+  const savedMarkets = await supabaseRequest(
+    `match_markets_cache?${query.toString()}`
+  );
+
+  if (savedMarkets && savedMarkets.length > 0) {
+    const savedPayload = savedMarkets[0].payload;
+
+    matchMarketsCache.set(cacheKey, {
+      at: Date.now(),
+      payload: savedPayload
+    });
+
+    return res.json({
+      ...savedPayload,
+      cached: true
+    });
+  }
+} catch (cacheError) {
+  console.error(
+    "Market cache read error:",
+    cacheError.message
+  );
+  } 
     const cached = matchMarketsCache.get(cacheKey);
 
     if (cached && (Date.now() - cached.at) < MATCH_MARKETS_CACHE_TTL_MS) {
@@ -1057,7 +1113,27 @@ app.get("/api/match-markets", async (req, res) => {
       requestsUsed,
       cacheTtlMs: MATCH_MARKETS_CACHE_TTL_MS
     };
-
+   try {
+  await supabaseRequest(
+    "match_markets_cache?on_conflict=event_id,sport_key,regions",
+    {
+      method: "POST",
+      prefer: "resolution=merge-duplicates,return=minimal",
+      body: {
+        event_id: eventId,
+        sport_key: sport,
+        regions: regions,
+        payload: payload,
+        fetched_at: new Date().toISOString()
+      }
+    }
+  );
+} catch (cacheError) {
+  console.error(
+    "Market cache save error:",
+    cacheError.message
+  );
+       } 
     matchMarketsCache.set(cacheKey, {
       at: Date.now(),
       payload
