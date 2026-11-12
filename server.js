@@ -411,7 +411,7 @@ end: end.toISOString()
 
 
 /* -------------------------------------------------------
-   MARKET REFERENCE CATALOGUE — THE 30 FOOTBALL MARKETS
+   MARKET REFERENCE CATALOGUE — THE 5 FOOTBALL MARKETS
 
    Grouped A–E exactly as documented for the product.
 
