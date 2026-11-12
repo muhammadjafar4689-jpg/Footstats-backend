@@ -1874,7 +1874,7 @@ function calculateTicket(picks, scoreEvents) {
     if (won === "void") {
       pick.result = "void";
       pick.settlement_note =
-        "Selection void (push/refund). Contributes 0 points.";
+        "Selection void. Associated odds excluded from points calculation.";
       return pick;
     }
 
@@ -1903,24 +1903,26 @@ function calculateTicket(picks, scoreEvents) {
     };
   }
 
-  // ---------- card-level result: THE HOUSE RULES ----------
-  const voids  = updatedPicks.filter(p => p.result === "void").length;
-  const losses = updatedPicks.filter(p => p.result === "lost").length;
-  const wins   = updatedPicks.filter(p => p.result === "won").length;
+  // ---------- CARD-LEVEL RESULT ----------
+
+  const losses = updatedPicks.filter(
+    p => p.result === "lost"
+  ).length;
+
+  const wins = updatedPicks.filter(
+    p => p.result === "won"
+  ).length;
 
   let result;
 
-  if (voids >= 2) {
-    result = "lost";          // two voids = automatic lost card
-    totalPoints = 0;
-  } else if (losses > 0) {
-    result = "lost";          // any lost pick zeroes the card
+  if (losses > 0) {
+    result = "lost";
     totalPoints = 0;
   } else if (wins === 0) {
-    result = "void";          // only reachable when ALL picks void
+    result = "void";
     totalPoints = 0;
   } else {
-    result = "win";           // 0 or 1 void excluded from judgement
+    result = "win";
   }
 
   return {
@@ -1929,7 +1931,7 @@ function calculateTicket(picks, scoreEvents) {
     picks: updatedPicks,
     points: Math.round(totalPoints * 100) / 100
   };
-}
+} 
 
 async function fetchScoreEvents(sportKey) {
   const result = await oddsRequest(
