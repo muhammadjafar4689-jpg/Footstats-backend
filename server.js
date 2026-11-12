@@ -17,6 +17,34 @@ const SCORING_SECRET = process.env.SCORING_SECRET;
 const ODDS_BASE = "https://api.the-odds-api.com/v4";
 const TABLE = "prediction_entries";
 const TZ = "Africa/Lagos";
+function getNigeriaMarketCacheDay() {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Africa/Lagos",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(new Date());
+
+  const values = {};
+  for (const part of parts) {
+    values[part.type] = part.value;
+  }
+
+  const today = `${values.year}-${values.month}-${values.day}`;
+
+  const [year, month, day] = today.split("-").map(Number);
+
+  const tomorrowDate = new Date(
+    Date.UTC(year, month - 1, day + 1)
+  );
+
+  const tomorrow = tomorrowDate.toISOString().slice(0, 10);
+
+  return {
+    start: new Date(`${today}T00:00:00+01:00`).toISOString(),
+    end: new Date(`${tomorrow}T00:00:00+01:00`).toISOString()
+  };
+}
 const POINTS_MULTIPLIER = 100;
 
 const FIXTURES_CONCURRENCY = 5;
