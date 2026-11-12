@@ -350,8 +350,7 @@ throw new Error(
 );
 }
 
-const url = "${SUPABASE_URL}/rest/v1/${path}";
-
+const url = `${SUPABASE_URL}/rest/v1/${path}`; 
 const response = await fetch(url, {
 method: options.method || "GET",
 
@@ -380,11 +379,10 @@ data = text;
 }
 
 if (!response.ok) {
-throw new Error(
-"Supabase HTTP ${response.status}: ${ typeof data === "string" ? data : JSON.stringify(data) }"
-);
+  throw new Error(
+    `Supabase HTTP ${response.status}: ${typeof data === "string" ? data : JSON.stringify(data)}`
+  );
 }
-
 return data;
 }
 
@@ -401,10 +399,8 @@ const values = {};
 for (const part of parts) {
 values[part.type] = part.value;
 }
-
-const today = "${values.year}-${values.month}-${values.day}";
-
-const start = new Date("${today}T00:00:00+01:00");
+const today = `${values.year}-${values.month}-${values.day}`;  
+const start = new Date(`${today}T00:00:00+01:00`); 
 const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
 
 return {
@@ -412,42 +408,7 @@ start: start.toISOString(),
 end: end.toISOString()
 };
 } 
-const response = await fetch(url, {
-    method: options.method || "GET",
 
-    headers: {
-      apikey: SUPABASE_SERVICE_ROLE_KEY,
-      Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-      "Content-Type": "application/json",
-      Prefer: options.prefer || "return=representation",
-      ...(options.headers || {})
-    },
-
-    body: options.body === undefined
-      ? undefined
-      : JSON.stringify(options.body)
-  });
-
-  const text = await response.text();
-
-  let data;
-
-  try {
-    data = text ? JSON.parse(text) : null;
-  } catch {
-    data = text;
-  }
-
-  if (!response.ok) {
-    throw new Error(
-      `Supabase HTTP ${response.status}: ${
-        typeof data === "string" ? data : JSON.stringify(data)
-      }`
-    );
-  }
-
-  return data;
-}
 
 /* -------------------------------------------------------
    MARKET REFERENCE CATALOGUE — THE 30 FOOTBALL MARKETS
