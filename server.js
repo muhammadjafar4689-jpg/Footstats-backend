@@ -431,55 +431,49 @@ end: end.toISOString()
 ------------------------------------------------------- */
 
 const MARKET_CATALOG = [
-  /* A. Match result and handicap markets */
-  { key: "h2h", name: "Match Winner (1X2)", group: "match_result", endpoint: "featured", supported: true },
-  { key: "h2h_3_way", name: "Three-Way Match Result", group: "match_result", endpoint: "event", supported: true },
-  { key: "double_chance", name: "Double Chance", group: "match_result", endpoint: "event", supported: true },
-  { key: "double_chance_h1", name: "First-Half Double Chance", group: "match_result", endpoint: "event", supported: true },
-  { key: "draw_no_bet", name: "Draw No Bet", group: "match_result", endpoint: "event", supported: true },
-  { key: "spreads", name: "Asian Handicap", group: "match_result", endpoint: "featured", supported: true },
-  { key: "alternate_spreads", name: "Alternative Handicap", group: "match_result", endpoint: "event", supported: true },
-  { key: "halftime_fulltime", name: "Half Time / Full Time", group: "match_result", endpoint: "event", supported: true },
-  { key: "h2h_3_way_h1", name: "First-Half Match Result", group: "match_result", endpoint: "event", supported: true },
-  { key: "h2h_3_way_h2", name: "Second-Half Match Result", group: "match_result", endpoint: "event", supported: true },
+  /* A. Match result markets */
+  {
+    key: "h2h",
+    name: "Match Winner (1X2)",
+    group: "match_result",
+    endpoint: "featured",
+    supported: true
+  },
+  {
+    key: "double_chance",
+    name: "Double Chance",
+    group: "match_result",
+    endpoint: "event",
+    supported: true
+  },
+  {
+    key: "draw_no_bet",
+    name: "Draw No Bet",
+    group: "match_result",
+    endpoint: "event",
+    supported: true
+  },
 
   /* B. Goal markets */
-  { key: "totals", name: "Over/Under Goals", group: "goals", endpoint: "featured", supported: true },
-  { key: "alternate_totals", name: "Alternative Over/Under", group: "goals", endpoint: "event", supported: true },
-  { key: "btts", name: "Both Teams to Score", group: "goals", endpoint: "event", supported: true },
-  { key: "btts_h1", name: "First-Half Both Teams to Score", group: "goals", endpoint: "event", supported: true },
-  { key: "btts_h2", name: "Second-Half Both Teams to Score", group: "goals", endpoint: "event", supported: true },
-  { key: "correct_score", name: "Correct Score", group: "goals", endpoint: "event", supported: true },
-  { key: "correct_score_h1", name: "First-Half Correct Score", group: "goals", endpoint: "event", supported: true },
-  { key: "totals_h1", name: "First-Half Over/Under", group: "goals", endpoint: "event", supported: true },
-  { key: "totals_h2", name: "Second-Half Over/Under", group: "goals", endpoint: "event", supported: true },
-  { key: "team_totals", name: "Team Goals Over/Under", group: "goals", endpoint: "event", supported: true },
-  { key: "team_totals_h1", name: "First-Half Team Goals", group: "goals", endpoint: "event", supported: true },
-  { key: "team_totals_h2", name: "Second-Half Team Goals", group: "goals", endpoint: "event", supported: true },
-
-  /* C. Corner markets */
-  { key: "alternate_totals_corners", name: "Total Corners", group: "corners", endpoint: "event", supported: true },
-  { key: "alternate_spreads_corners", name: "Corner Handicap", group: "corners", endpoint: "event", supported: true },
-  { key: "alternate_team_totals_corners", name: "Team Total Corners", group: "corners", endpoint: "event", supported: true },
-  { key: "corners_1x2", name: "Corner Result", group: "corners", endpoint: "event", supported: true },
-
-  /* D. Card markets */
-  { key: "alternate_totals_cards", name: "Total Cards", group: "cards", endpoint: "event", supported: true },
-  { key: "alternate_spreads_cards", name: "Card Handicap", group: "cards", endpoint: "event", supported: true },
-
-  /* E. Fouls markets — NOT offered by The Odds API.
-     Listed so the UI can display them as unavailable.
-     Do not request keys that the provider does not have. */
-  { key: null, name: "Total Fouls", group: "fouls", endpoint: null, supported: false },
-  { key: null, name: "Team Fouls", group: "fouls", endpoint: null, supported: false }
+  {
+    key: "alternate_totals",
+    name: "Alternative Over/Under",
+    group: "goals",
+    endpoint: "event",
+    supported: true
+  },
+  {
+    key: "btts",
+    name: "Both Teams to Score",
+    group: "goals",
+    endpoint: "event",
+    supported: true
+  }
 ];
 
 const MARKET_GROUPS = [
-  { id: "match_result", title: "Match Result & Handicap" },
-  { id: "goals", title: "Goals" },
-  { id: "corners", title: "Corners" },
-  { id: "cards", title: "Cards" },
-  { id: "fouls", title: "Fouls" }
+  { id: "match_result", title: "Match Result" },
+  { id: "goals", title: "Goals" }
 ];
 
 /* Market keys that can actually be requested from the provider. */
@@ -493,8 +487,7 @@ function marketLabel(key) {
   return item
     ? item.name
     : String(key || "").replace(/_/g, " ");
-}
-
+} 
 /* -------------------------------------------------------
    ODDS NORMALIZATION
 ------------------------------------------------------- */
