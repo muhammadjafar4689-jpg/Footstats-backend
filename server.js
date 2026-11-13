@@ -2223,9 +2223,8 @@ app.post("/api/score-predictions", async (req, res) => {
 /* -------------------------------------------------------
    LEADERBOARD
 ------------------------------------------------------- */
-function getWeeklyCompetitionPeriod() {
-  const now = new Date();
-
+function getWeeklyCompetitionPeriod(referenceDate = new Date()) {
+  const now = referenceDate; 
   const parts = new Intl.DateTimeFormat("en-GB", {
     timeZone: "Africa/Lagos",
     year: "numeric",
@@ -2260,8 +2259,26 @@ function getWeeklyCompetitionPeriod() {
 
 app.get("/api/leaderboard", async (req, res) => {
   try {
-    const period = getWeeklyCompetitionPeriod();
+    const requestedDate = String(req.query.weekDate || "").trim();
 
+let referenceDate = new Date();
+
+if (requestedDate) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(requestedDate)) {
+    return sendError(res, 400, "Invalid week date. Use YYYY-MM-DD.");
+  }
+
+  referenceDate = new Date(`${requestedDate}T12:00:00Z`);
+
+if (
+  Number.isNaN(referenceDate.getTime()) ||
+  referenceDate.toISOString().slice(0, 10) !== requestedDate
+) {
+  return sendError(res, 400, "Invalid week date.");
+} 
+}
+
+const period = getWeeklyCompetitionPeriod(referenceDate); 
     const entries = await supabaseRequest(
   `${TABLE}?created_at=gte.${period.start}&created_at=lt.${period.end}&select=user_id,result,points,settled_at,created_at,status`,
   { method: "GET" }
