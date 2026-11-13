@@ -2223,13 +2223,49 @@ app.post("/api/score-predictions", async (req, res) => {
 /* -------------------------------------------------------
    LEADERBOARD
 ------------------------------------------------------- */
+function getWeeklyCompetitionPeriod() {
+  const now = new Date();
+
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Africa/Lagos",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(now);
+
+  const get = type => Number(
+    parts.find(p => p.type === type).value
+  );
+
+  const year = get("year");
+  const month = get("month");
+  const day = get("day");
+
+  const todayUTC = new Date(Date.UTC(year, month - 1, day));
+  const daysSinceSaturday = (todayUTC.getUTCDay() + 1) % 7;
+
+  const start = new Date(
+    Date.UTC(year, month - 1, day - daysSinceSaturday, -1)
+  );
+
+  const end = new Date(
+    start.getTime() + 7 * 24 * 60 * 60 * 1000
+  );
+
+  return {
+    start: start.toISOString(),
+    end: end.toISOString()
+  };
+} 
 
 app.get("/api/leaderboard", async (req, res) => {
   try {
+    const period = getWeeklyCompetitionPeriod();
+
     const entries = await supabaseRequest(
-      `${TABLE}?status=eq.graded&select=user_id,result,points,settled_at`,
+      `${TABLE}?status=eq.graded&created_at=gte.${period.start}&created_at=lt.${period.end}&select=user_id,result,points,settled_at,created_at`,
       { method: "GET" }
-    );
+    ); 
 
     // profiles table may not exist yet — degrade gracefully
     let profiles = [];
