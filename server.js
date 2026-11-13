@@ -2263,10 +2263,17 @@ app.get("/api/leaderboard", async (req, res) => {
     const period = getWeeklyCompetitionPeriod();
 
     const entries = await supabaseRequest(
-      `${TABLE}?status=eq.graded&created_at=gte.${period.start}&created_at=lt.${period.end}&select=user_id,result,points,settled_at,created_at`,
-      { method: "GET" }
-    ); 
+  `${TABLE}?created_at=gte.${period.start}&created_at=lt.${period.end}&select=user_id,result,points,settled_at,created_at,status`,
+  { method: "GET" }
+); 
 
+  const unsettledCards = (entries || []).filter(
+  entry => entry.status !== "graded"
+).length;
+
+const weekEnded = Date.now() >= new Date(period.end).getTime();
+
+const isFinal = weekEnded && unsettledCards === 0;   
     // profiles table may not exist yet — degrade gracefully
     let profiles = [];
 
@@ -2343,10 +2350,14 @@ for (const profile of profiles || []) {
       }));
 
     res.json({
-      success: true,
-      count: leaderboard.length,
-      leaderboard
-    });
+  success: true,
+  period,
+  weekEnded,
+  isFinal,
+  unsettledCards,
+  count: leaderboard.length,
+  leaderboard
+}); 
   } catch (error) {
     sendError(res, 502, "Could not load leaderboard.", {
       details: error.message
