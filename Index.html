@@ -1007,9 +1007,14 @@ async function submitSlip(){
 
     const out=await res.json().catch(()=>({}));
     if(!res.ok||out.success===false){
-      throw Error(out.error||out.message||("HTTP "+res.status));
-    }
-
+  throw Error(
+    out.details?.details ||
+    out.details ||
+    out.error ||
+    out.message ||
+    ("HTTP "+res.status)
+  );
+  } 
     submissionSucceeded=true;
     slip=[];
     renderMatches();
