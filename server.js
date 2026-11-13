@@ -2060,16 +2060,20 @@ app.post("/api/cards", async (req, res) => {
       p_picks: picks
     }
   }
-); 
+);
 
-    res.json({ success: true, card });
-  } catch (error) {
-    sendError(res, 500, "Could not submit card.", {
-      details: error.message
-    });
-  }
-});
+res.json({ success: true, card });
 
+} catch (error) {
+  const status = error.message?.includes("Supabase HTTP 400")
+    ? 400
+    : 500;
+
+  sendError(res, status, "Could not submit card.", {
+    details: error.message
+  });
+}
+});  
 /* -------------------------------------------------------
    PREDICTION SCORING
 ------------------------------------------------------- */
