@@ -966,11 +966,10 @@ async function submitSlip(){
 
   if(submitting)return;
   if(!user){msg.textContent="Sign in first.";return}
-  if(slip.length===0){
-    msg.textContent="Add at least one pick to your slip.";
-    return;
-  }
-
+ if(slip.length<3){
+  msg.textContent="Your card must contain at least 3 different matches.";
+  return;
+  }  
   const eventKeys=slip.map(p=>p.sport_key+"|"+p.event_id);
   if(new Set(eventKeys).size!==slip.length){
     msg.textContent="Your slip contains duplicate matches. Remove duplicates before submitting.";
