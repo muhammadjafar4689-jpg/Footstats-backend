@@ -870,8 +870,7 @@ function renderSlip(){
   else msg.textContent="Your slip is ready to submit.";
 
   button.textContent=`Submit prediction (${slip.length} pick${slip.length===1?"":"s"})`;
-  button.disabled=!user||slip.length===0||submitting;
-}
+  button.disabled=!user||slip.length<3||submitting; 
 async function checkUser(){
   const {data,error}=await db.auth.getSession();
   if(error)throw error;
