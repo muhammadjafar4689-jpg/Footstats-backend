@@ -871,6 +871,8 @@ function renderSlip(){
 
   button.textContent=`Submit prediction (${slip.length} pick${slip.length===1?"":"s"})`;
   button.disabled=!user||slip.length<3||submitting; 
+ } 
+  
 async function checkUser(){
   const {data,error}=await db.auth.getSession();
   if(error)throw error;
