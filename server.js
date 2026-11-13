@@ -2051,21 +2051,16 @@ app.post("/api/cards", async (req, res) => {
       }
     }
 
-    const inserted = await supabaseRequest(TABLE, {
-      method: "POST",
-      prefer: "return=representation",
-      body: {
-        user_id: user.id,
-        picks,
-        point: 0,
-        points: 0,
-        status: "pending",
-        result: null,
-        points_awarded: false
-      }
-    });
-
-    const card = Array.isArray(inserted) ? inserted[0] : inserted;
+ const card = await supabaseRequest(
+  "rpc/submit_prediction_card",
+  {
+    method: "POST",
+    body: {
+      p_user_id: user.id,
+      p_picks: picks
+    }
+  }
+); 
 
     res.json({ success: true, card });
   } catch (error) {
