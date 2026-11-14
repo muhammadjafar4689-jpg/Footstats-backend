@@ -2051,7 +2051,7 @@ app.post("/api/cards", async (req, res) => {
       }
     }
 
- const card = await supabaseRequest(
+const card = await supabaseRequest(
   "rpc/submit_prediction_card",
   {
     method: "POST",
@@ -2062,7 +2062,28 @@ app.post("/api/cards", async (req, res) => {
   }
 );
 
-res.json({ success: true, card });
+// Check whether this submission qualifies a referral reward
+let referralRewardAwarded = false;
+
+try {
+  referralRewardAwarded = await supabaseRequest(
+    "rpc/award_referral_if_qualified",
+    {
+      method: "POST",
+      body: {
+        p_referred_user_id: user.id
+      }
+    }
+  );
+} catch (referralError) {
+  console.error("Referral reward check failed:", referralError.message);
+}
+
+res.json({
+  success: true,
+  card,
+  referralRewardAwarded: referralRewardAwarded === true
+});  
 
 } catch (error) {
   const status = error.message?.includes("Supabase HTTP 400")
