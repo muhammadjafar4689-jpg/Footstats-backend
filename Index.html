@@ -163,15 +163,20 @@ footer{text-align:center;padding:25px;color:var(--muted);font-size:11px}
     <div class="panel">
       <div id="accountState" class="notice">Checking login status...</div>
       <div id="authForm">
-        <label for="email">Email address</label>
-        <input id="email" type="email" autocomplete="email" placeholder="you@example.com">
-        <label for="password">Password</label>
-        <input id="password" type="password" autocomplete="current-password" placeholder="At least 6 characters">
-        <div class="row" style="margin-top:12px">
-          <button class="btn primary" id="signIn">Sign in</button>
-          <button class="btn" id="signUp">Create account</button>
-        </div>
-      </div>
+  <label for="email">Email address</label>
+  <input id="email" type="email" autocomplete="email" placeholder="you@example.com">
+
+  <label for="referralCode">Referral code (optional)</label>
+  <input id="referralCode" type="text" autocomplete="off" placeholder="Enter referral code">
+
+  <label for="password">Password</label>
+  <input id="password" type="password" autocomplete="current-password" placeholder="At least 6 characters">
+
+  <div class="row" style="margin-top:12px">
+    <button class="btn primary" id="signIn">Sign in</button>
+    <button class="btn" id="signUp">Create account</button>
+  </div>
+  </div> 
       <button class="btn" id="signOut" hidden>Sign out</button>
       <div id="usernameBlock" hidden style="margin-top:14px">
         <label for="usernameInput">Username (shown on the leaderboard)</label>
@@ -939,8 +944,15 @@ async function authAction(type){
   try{
     const result=type==="in"
       ?await db.auth.signInWithPassword({email,password})
-      :await db.auth.signUp({email,password});
-
+      :await db.auth.signUp({
+  email,
+  password,
+  options: {
+    data: {
+      referral_code: document.getElementById("referralCode").value.trim().toUpperCase()
+    }
+  }
+});
     if(result.error)throw result.error;
 
     user=result.data.session?.user||result.data.user||null;
