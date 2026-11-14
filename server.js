@@ -2304,7 +2304,10 @@ const period = getWeeklyCompetitionPeriod(referenceDate);
   `${TABLE}?created_at=gte.${period.start}&created_at=lt.${period.end}&select=user_id,result,points,settled_at,created_at,status`,
   { method: "GET" }
 ); 
-
+const referralRewards = await supabaseRequest(
+  `referral_rewards?awarded_at=gte.${period.start}&awarded_at=lt.${period.end}&select=referrer_user_id,points,awarded_at`,
+  { method: "GET" }
+); 
   const unsettledCards = (entries || []).filter(
   entry => entry.status !== "graded"
 ).length;
@@ -2370,22 +2373,30 @@ for (const profile of profiles || []) {
 
       totals.set(userId, row);
     }
+    // Add referral points without increasing win-card count
+for (const reward of referralRewards || []) {
+  const userId = reward.referrer_user_id;
+  if (!userId) continue;
 
+  const row = totals.get(userId);
+
+  if (row) {
+    row.points += safeNumber(reward.points) || 0;
+    }
+  }
     const leaderboard = Array.from(totals.values())
-      .map(row => ({
-        username: row.username,
-        win_cards: row.win_cards,
-        points: Math.round(row.points * 100) / 100
-      }))
-      .sort((a, b) =>
-        b.points - a.points ||
-        b.win_cards - a.win_cards ||
-        new Date(a.first_win_at) - new Date(b.first_win_at)
-      )
-      .map((row, index) => ({
-        rank: index + 1,
-        ...row
-      }));
+  .sort((a, b) =>
+    b.points - a.points ||
+    b.win_cards - a.win_cards ||
+    (a.first_win_at ? new Date(a.first_win_at).getTime() : Infinity) -
+    (b.first_win_at ? new Date(b.first_win_at).getTime() : Infinity)
+  )
+  .map((row, index) => ({
+    rank: index + 1,
+    username: row.username,
+    win_cards: row.win_cards,
+    points: Math.round(row.points * 100) / 100
+  })); 
 
     res.json({
   success: true,
