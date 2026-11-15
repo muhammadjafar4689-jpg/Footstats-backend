@@ -948,10 +948,11 @@ async function authAction(type){
   email,
   password,
   options: {
-    data: {
-      referral_code: document.getElementById("referralCode").value.trim().toUpperCase()
-    }
+  emailRedirectTo: "https://run.spck.io/Index.html",
+  data: {
+    referral_code: document.getElementById("referralCode").value.trim().toUpperCase()
   }
+  } 
 });
     if(result.error)throw result.error;
 
