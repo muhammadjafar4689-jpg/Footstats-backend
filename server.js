@@ -1992,14 +1992,15 @@ app.post("/api/cards", async (req, res) => {
       return sendError(res, 400, "Card must contain at least 1 pick.");
     }
 
-    /*
-      Keep ONLY the fields the scorer reads plus harmless
-      display labels. Anything the client sends for
-      points/status/result is discarded here.
-    */
+    const marketCacheDay = getNigeriaMarketCacheDay();
+
+    const verifiedCache = new Map();
+
     const picks = rawPicks.map(p => {
       const marketKey = getMarketKey(p);
-      const line = safeNumber(p.point_value ?? p.line ?? p.point);
+      const line = safeNumber(
+        p.point_value ?? p.line ?? p.point
+      );
 
       return {
         event_id: getEventId(p),
@@ -2009,92 +2010,203 @@ app.post("/api/cards", async (req, res) => {
         away: String(p.away ?? p.away_team ?? ""),
         league: String(p.league ?? ""),
         market_key: marketKey,
-        market_name: String(p.market_name ?? marketLabel(marketKey)),
+        market_name: String(
+          p.market_name ?? marketLabel(marketKey)
+        ),
         outcome: getSelection(p),
         selection: String(p.selection ?? ""),
-        odds: getSavedOdds(p),
-        price: getSavedOdds(p),
-        // the line under BOTH names: legacy rows read point_value first
-        ...(line !== null ? { point: line, point_value: line } : {}),
-        // team name for team_totals — without it market 20 can't settle
-        ...(p.description ? { description: String(p.description) } : {})
+        point: line,
+        point_value: line,
+        description: p.description
+          ? String(p.description)
+          : null
       };
     });
 
     for (const pick of picks) {
       if (!pick.event_id || !pick.sport_key) {
-        return sendError(res, 400,
-          "Pick is missing event_id or sport_key.", { pick });
+        return sendError(
+          res,
+          400,
+          "Pick is missing event_id or sport_key."
+        );
       }
 
       if (!pick.outcome) {
-        return sendError(res, 400, "Pick is missing its outcome.", { pick });
-      }
-
-      if (pick.odds === null) {
-        return sendError(res, 400, "Pick has invalid decimal odds.", { pick });
+        return sendError(
+          res,
+          400,
+          "Pick is missing its outcome."
+        );
       }
 
       if (!SETTLEABLE_MARKET_KEYS.has(pick.market_key)) {
-        return sendError(res, 400,
-          `Market "${pick.market_key}" is display-only and is not scored.`);
+        return sendError(
+          res,
+          400,
+          `Market "${pick.market_key}" is display-only and is not scored.`
+        );
       }
 
       if (
-        ["spreads", "alternate_spreads", "totals", "alternate_totals", "team_totals"]
-          .includes(pick.market_key) &&
-        pick.point !== undefined &&
+        [
+          "spreads",
+          "alternate_spreads",
+          "totals",
+          "alternate_totals",
+          "team_totals"
+        ].includes(pick.market_key) &&
+        pick.point !== null &&
         isQuarterLine(pick.point)
       ) {
-        return sendError(res, 400,
-          "Quarter lines (x.25 / x.75) are not scored — they split the stake.");
+        return sendError(
+          res,
+          400,
+          "Quarter lines (x.25 / x.75) are not scored — they split the stake."
+        );
       }
+
+      const cacheKey =
+        `${pick.sport_key}|${pick.event_id}|uk`;
+
+      if (!verifiedCache.has(cacheKey)) {
+        const query = new URLSearchParams({
+          select: "payload",
+          event_id: `eq.${pick.event_id}`,
+          sport_key: `eq.${pick.sport_key}`,
+          regions: "eq.uk",
+          and: `(fetched_at.gte.${marketCacheDay.start},fetched_at.lt.${marketCacheDay.end})`
+        });
+
+        const rows = await supabaseRequest(
+          `match_markets_cache?${query.toString()}`
+        );
+
+        if (!Array.isArray(rows) || rows.length === 0) {
+          return sendError(
+            res,
+            400,
+            "Cannot verify this match's odds. Please refresh the market and try again."
+          );
+        }
+
+        verifiedCache.set(
+          cacheKey,
+          rows[0].payload
+        );
+      }
+
+      const savedPayload = verifiedCache.get(cacheKey);
+
+      const savedMarket =
+        savedPayload?.markets?.[pick.market_key];
+
+      if (!savedMarket || !Array.isArray(savedMarket.outcomes)) {
+        return sendError(
+          res,
+          400,
+          "This market could not be verified. Please refresh and try again."
+        );
+      }
+
+      const submittedLine = pick.point;
+      const submittedDescription = normalizeText(
+        pick.description || ""
+      );
+
+      const verifiedOutcome = savedMarket.outcomes.find(o => {
+        const sameName =
+          normalizeText(o.name) === normalizeText(pick.outcome);
+
+        const savedLine =
+          o.point == null || o.point === ""
+            ? null
+            : safeNumber(o.point);
+
+        const sameLine = savedLine === submittedLine;
+
+        const savedDescription = normalizeText(
+          o.description || ""
+        );
+
+        const sameDescription =
+          savedDescription === submittedDescription;
+
+        return sameName && sameLine && sameDescription;
+      });
+
+      if (!verifiedOutcome) {
+        return sendError(
+          res,
+          400,
+          "This selection or betting line does not match the saved market. Please refresh your odds."
+        );
+      }
+
+      const trustedOdds = safeNumber(verifiedOutcome.price);
+
+      if (trustedOdds === null || trustedOdds <= 1) {
+        return sendError(
+          res,
+          400,
+          "The saved odds for this selection are invalid."
+        );
+      }
+
+      // Always save backend-verified odds.
+      // Never use odds supplied by the user's phone.
+      pick.odds = trustedOdds;
+      pick.price = trustedOdds;
     }
 
-const card = await supabaseRequest(
-  "rpc/submit_prediction_card",
-  {
-    method: "POST",
-    body: {
-      p_user_id: user.id,
-      p_picks: picks
+    const card = await supabaseRequest(
+      "rpc/submit_prediction_card",
+      {
+        method: "POST",
+        body: {
+          p_user_id: user.id,
+          p_picks: picks
+        }
+      }
+    );
+
+    // Check whether this submission qualifies a referral reward.
+    let referralRewardAwarded = false;
+
+    try {
+      referralRewardAwarded = await supabaseRequest(
+        "rpc/award_referral_if_qualified",
+        {
+          method: "POST",
+          body: {
+            p_referred_user_id: user.id
+          }
+        }
+      );
+    } catch (referralError) {
+      console.error(
+        "Referral reward check failed:",
+        referralError.message
+      );
     }
+
+    res.json({
+      success: true,
+      card,
+      referralRewardAwarded:
+        referralRewardAwarded === true
+    });
+
+  } catch (error) {
+    const status = error.message?.includes("Supabase HTTP 400")
+      ? 400
+      : 500;
+
+    sendError(res, status, "Could not submit card.", {
+      details: error.message
+    });
   }
-);
-
-// Check whether this submission qualifies a referral reward
-let referralRewardAwarded = false;
-
-try {
-  referralRewardAwarded = await supabaseRequest(
-    "rpc/award_referral_if_qualified",
-    {
-      method: "POST",
-      body: {
-        p_referred_user_id: user.id
-      }
-    }
-  );
-} catch (referralError) {
-  console.error("Referral reward check failed:", referralError.message);
-}
-
-res.json({
-  success: true,
-  card,
-  referralRewardAwarded: referralRewardAwarded === true
-});  
-
-} catch (error) {
-  const status = error.message?.includes("Supabase HTTP 400")
-    ? 400
-    : 500;
-
-  sendError(res, status, "Could not submit card.", {
-    details: error.message
-  });
-}
-});  
+}); 
 /* -------------------------------------------------------
    PREDICTION SCORING
 ------------------------------------------------------- */
