@@ -88,7 +88,7 @@ footer{text-align:center;padding:25px;color:var(--muted);font-size:11px}
   <button data-page="leaderboard">Leaderboard</button>
   <button data-page="account">Account</button>
 </nav>
-
+  <button data-page="admin" id="adminNav" hidden>Admin</button> 
 <main>
   <section id="page-matches">
     <h1>Prediction Challenge</h1>
@@ -189,6 +189,56 @@ footer{text-align:center;padding:25px;color:var(--muted);font-size:11px}
       <div id="authMessage" class="notice"></div>
     </div>
   </section>
+ <section id="page-admin" hidden>
+  <h2>Admin Control Panel</h2>
+  <p>Manage registered users and competition adjustments.</p>
+
+  <div class="card">
+    <h3>Registered Users</h3>
+    <p id="adminUserCount">Loading users...</p>
+
+    <select id="adminUserSelect">
+      <option value="">Select a user</option>
+    </select>
+  </div>
+
+  <div class="card">
+    <h3>Adjust User Account</h3>
+
+    <label for="adminPointsDelta">Points adjustment</label>
+    <input
+      id="adminPointsDelta"
+      type="number"
+      step="1"
+      value="0"
+      placeholder="Example: 100 or -100"
+    >
+
+    <label for="adminWinsDelta">Win cards adjustment</label>
+    <input
+      id="adminWinsDelta"
+      type="number"
+      step="1"
+      value="0"
+      placeholder="Example: 1 or -1"
+    >
+
+    <label for="adminReason">Reason for adjustment</label>
+    <textarea
+      id="adminReason"
+      placeholder="Explain why you are adjusting this user's account"
+    ></textarea>
+
+    <button id="adminApply">Apply Adjustment</button>
+
+    <p id="adminMessage"></p>
+  </div>
+
+  <div class="card">
+    <h3>Adjustment History</h3>
+    <div id="adminHistory">History will appear here.</div>
+  </div>
+  </section>  
 </main>
 <footer>FOOTSTATS · Football data and scoring provided by your connected backend.</footer>
 
@@ -1076,6 +1126,144 @@ async function loadLeaderboard(){
     box.innerHTML=`<div class="empty error">Leaderboard unavailable: ${escapeHTML(err.message)}</div>`;
   }
 }
+  // ---------------- ADMIN PANEL ----------------
+
+const ADMIN_USER_ID = "8af15d87-1cf8-4686-95a2-b6485c4708e8";
+
+function isAdminUser() {
+  return !!user &&
+    user.id.toLowerCase() === ADMIN_USER_ID.toLowerCase();
+}
+
+function setAdminVisibility() {
+  const adminButton = document.getElementById("adminNav");
+
+  if (!adminButton) return;
+
+  adminButton.hidden = !isAdminUser();
+
+  if (!isAdminUser() &&
+      document.getElementById("page-admin") &&
+      !document.getElementById("page-admin").hidden) {
+    document.getElementById("page-admin").hidden = true;
+    document.getElementById("page-matches").hidden = false;
+  }
+}
+
+async function adminRequest(path, options = {}) {
+  const { data: { session } } = await db.auth.getSession();
+
+  if (!session) {
+    throw new Error("Please sign in again.");
+  }
+
+  const response = await fetch(API + path, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer " + session.access_token,
+      ...(options.headers || {})
+    }
+  });
+
+  const result = await response.json();
+
+  if (!response.ok || result.success === false) {
+    throw new Error(
+      result.details || result.error || "Administrator request failed."
+    );
+  }
+
+  return result;
+}
+
+async function loadAdminUsers() {
+  const count = document.getElementById("adminUserCount");
+  const select = document.getElementById("adminUserSelect");
+
+  count.textContent = "Loading users...";
+
+  try {
+    const result = await adminRequest("/api/admin/users");
+
+    select.innerHTML = '<option value="">Select a user</option>';
+
+    (result.users || []).forEach(item => {
+      const option = document.createElement("option");
+      option.value = item.user_id;
+      option.textContent = item.username || item.user_id;
+      select.appendChild(option);
+    });
+
+    count.textContent = "Registered users: " + result.count;
+
+  } catch (error) {
+    count.textContent = error.message;
+  }
+}
+
+async function applyAdminAdjustment() {
+  const message = document.getElementById("adminMessage");
+  const targetUserId = document.getElementById("adminUserSelect").value;
+  const pointsDelta = Number(document.getElementById("adminPointsDelta").value);
+  const winsDelta = Number(document.getElementById("adminWinsDelta").value);
+  const reason = document.getElementById("adminReason").value.trim();
+
+  if (!targetUserId) {
+    message.textContent = "Please select a user.";
+    return;
+  }
+
+  if (!Number.isSafeInteger(pointsDelta) ||
+      !Number.isSafeInteger(winsDelta)) {
+    message.textContent = "Enter whole numbers only.";
+    return;
+  }
+
+  if (pointsDelta === 0 && winsDelta === 0) {
+    message.textContent = "Enter a points or win-card adjustment.";
+    return;
+  }
+
+  if (!reason) {
+    message.textContent = "Please enter a reason.";
+    return;
+  }
+
+  if (!confirm("Apply this adjustment to the selected user?")) {
+    return;
+  }
+
+  message.textContent = "Applying adjustment...";
+
+  try {
+    await adminRequest("/api/admin/adjust-user", {
+      method: "POST",
+      body: JSON.stringify({
+        target_user_id: targetUserId,
+        points_delta: pointsDelta,
+        win_cards_delta: winsDelta,
+        reason
+      })
+    });
+
+    message.textContent = "Adjustment recorded successfully.";
+
+    document.getElementById("adminPointsDelta").value = 0;
+    document.getElementById("adminWinsDelta").value = 0;
+    document.getElementById("adminReason").value = "";
+
+    if (typeof loadLeaderboard === "function") {
+      loadLeaderboard();
+    }
+
+  } catch (error) {
+    message.textContent = error.message;
+  }
+}
+
+document.getElementById("adminApply")
+  .addEventListener("click", applyAdminAdjustment);
 document.querySelectorAll("nav [data-page]").forEach(btn=>btn.addEventListener("click",()=>{
   document.querySelectorAll("nav [data-page]").forEach(b=>b.classList.toggle("active",b===btn));
   document.querySelectorAll("main section").forEach(s=>{
