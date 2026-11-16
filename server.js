@@ -2389,7 +2389,126 @@ function getWeeklyCompetitionPeriod(referenceDate = new Date()) {
     end: end.toISOString()
   };
 } 
+// ---------------- ADMIN SECURITY ----------------
 
+async function verifyAdmin(req) {
+const adminId = process.env.ADMIN_USER_ID;
+
+if (!adminId) {
+throw new Error("ADMIN_USER_ID is not configured.");
+}
+
+const authorization = String(req.headers.authorization || "");
+const token = authorization.startsWith("Bearer ")
+? authorization.slice(7).trim()
+: "";
+
+if (!token) {
+throw new Error("Authentication required.");
+}
+
+const user = await getUserFromJwt(token);
+
+if (!user || user.id !== adminId) {
+throw new Error("Administrator access denied.");
+}
+
+return user;
+}
+
+// ---------------- VIEW USERS ----------------
+
+app.get("/api/admin/users", async (req, res) => {
+try {
+await verifyAdmin(req);
+
+const users = await supabaseRequest(
+  "profiles?select=user_id,username&order=username.asc",
+  { method: "GET" }
+);
+
+res.json({
+  success: true,
+  count: users.length,
+  users
+});
+
+} catch (error) {
+sendError(res, 403, "Administrator access denied.", {
+details: error.message
+});
+}
+});
+
+// ---------------- ADJUST USER POINTS AND WIN CARDS ----------------
+
+app.post("/api/admin/adjust-user", async (req, res) => {
+try {
+const admin = await verifyAdmin(req);
+
+const targetUserId = String(
+  req.body.target_user_id || ""
+).trim();
+
+const pointsDelta = req.body.points_delta ?? 0;
+const winCardsDelta = req.body.win_cards_delta ?? 0;
+const reason = String(req.body.reason || "").trim();
+
+if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(targetUserId)) {
+  return sendError(res, 400, "Invalid target user ID.");
+}
+
+if (
+  !Number.isSafeInteger(pointsDelta) ||
+  !Number.isSafeInteger(winCardsDelta)
+) {
+  return sendError(res, 400, "Points and win cards must be whole numbers.");
+}
+
+if (pointsDelta === 0 && winCardsDelta === 0) {
+  return sendError(res, 400, "Enter points or win cards to adjust.");
+}
+
+if (!reason || reason.length > 300) {
+  return sendError(res, 400, "Enter a reason (maximum 300 characters).");
+}
+
+const profiles = await supabaseRequest(
+  `profiles?user_id=eq.${targetUserId}&select=user_id,username`,
+  { method: "GET" }
+);
+
+if (!profiles.length) {
+  return sendError(res, 404, "User not found.");
+}
+
+const adjustment = await supabaseRequest(
+  "admin_user_adjustments",
+  {
+    method: "POST",
+    body: {
+      target_user_id: targetUserId,
+      admin_user_id: admin.id,
+      points_delta: pointsDelta,
+      win_cards_delta: winCardsDelta,
+      reason
+    }
+  }
+);
+
+res.json({
+  success: true,
+  message: "User adjustment recorded.",
+  user: profiles[0],
+  adjustment: adjustment[0]
+});
+
+} catch (error) {
+sendError(res, 403, "Could not complete administrator adjustment.", {
+details: error.message
+});
+}
+});
 app.get("/api/leaderboard", async (req, res) => {
   try {
     const requestedDate = String(req.query.weekDate || "").trim();
@@ -2419,7 +2538,11 @@ const period = getWeeklyCompetitionPeriod(referenceDate);
 const referralRewards = await supabaseRequest(
   `referral_rewards?awarded_at=gte.${period.start}&awarded_at=lt.${period.end}&select=referrer_user_id,points,awarded_at`,
   { method: "GET" }
-); 
+);
+  const adminAdjustments = await supabaseRequest(
+  `admin_user_adjustments?created_at=gte.${period.start}&created_at=lt.${period.end}&select=target_user_id,points_delta,win_cards_delta,created_at`,
+  { method: "GET" }
+);   
   const unsettledCards = (entries || []).filter(
   entry => entry.status !== "graded"
 ).length;
@@ -2485,7 +2608,7 @@ for (const profile of profiles || []) {
 
       totals.set(userId, row);
     }
-    // Add referral points without increasing win-card count
+// Add referral points
 for (const reward of referralRewards || []) {
   const userId = reward.referrer_user_id;
   if (!userId) continue;
@@ -2494,8 +2617,28 @@ for (const reward of referralRewards || []) {
 
   if (row) {
     row.points += safeNumber(reward.points) || 0;
-    }
   }
+}
+
+// Add administrator adjustments
+for (const adjustment of adminAdjustments || []) {
+  const userId = adjustment.target_user_id;
+  if (!userId) continue;
+
+  const row = totals.get(userId);
+  if (!row) continue;
+
+  row.points += safeNumber(adjustment.points_delta) || 0;
+  row.win_cards += safeNumber(adjustment.win_cards_delta) || 0;
+
+  if (
+    (safeNumber(adjustment.win_cards_delta) || 0) > 0 &&
+    (!row.first_win_at ||
+      adjustment.created_at < row.first_win_at)
+  ) {
+    row.first_win_at = adjustment.created_at;
+  }
+}
     const leaderboard = Array.from(totals.values())
   .sort((a, b) =>
     b.points - a.points ||
