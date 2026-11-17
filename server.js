@@ -2669,7 +2669,7 @@ app.post("/api/admin/house-accounts/initialize", async (req, res) => {
         { method: "GET" }
       ),
       supabaseRequest(
-        "house_accounts?select=user_id",
+        "house_accounts?select=user_id,settings",
         { method: "GET" }
       )
     ]);
@@ -2682,8 +2682,14 @@ app.post("/api/admin/house-accounts/initialize", async (req, res) => {
     );
 
     const houseUserIds = new Set(
-      (houseAccounts || []).map(a => a.user_id)
-    );
+  (houseAccounts || []).map(a => a.user_id)
+);
+
+const houseAccountNumbers = new Set(
+  (houseAccounts || [])
+    .map(a => Number(a.settings?.bot_number))
+    .filter(n => Number.isInteger(n) && n >= 1 && n <= HOUSE_ACCOUNT_COUNT)
+); 
 
     const created = [];
     const skipped = [];
@@ -2691,6 +2697,10 @@ app.post("/api/admin/house-accounts/initialize", async (req, res) => {
     for (let i = 1; i <= HOUSE_ACCOUNT_COUNT; i++) {
       const username = `HouseBot${String(i).padStart(2, "0")}`;
       const email = `${username.toLowerCase()}@footstats.invalid`;
+      if (houseAccountNumbers.has(i)) {
+       skipped.push(username);
+       continue;
+       }
 
       const existingProfile = profileByUsername.get(
         username.toLowerCase()
