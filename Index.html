@@ -1202,6 +1202,33 @@ async function loadAdminUsers() {
     count.textContent = error.message;
   }
 }
+  async function loadAdminHistory() {
+  const box = document.getElementById("adminHistory");
+
+  box.textContent = "Loading adjustment history...";
+
+  try {
+    const result = await adminRequest("/api/admin/adjustments");
+
+    if (!result.adjustments || result.adjustments.length === 0) {
+      box.textContent = "No adjustments recorded yet.";
+      return;
+    }
+
+    box.innerHTML = result.adjustments.map(item => `
+      <div class="card">
+        <strong>${escapeHTML(item.username)}</strong>
+        <p>Points: ${Number(item.points_delta) > 0 ? "+" : ""}${Number(item.points_delta)}</p>
+        <p>Win cards: ${Number(item.win_cards_delta) > 0 ? "+" : ""}${Number(item.win_cards_delta)}</p>
+        <p>Reason: ${escapeHTML(item.reason)}</p>
+        <small>${new Date(item.created_at).toLocaleString()}</small>
+      </div>
+    `).join("");
+
+  } catch (error) {
+    box.textContent = error.message;
+  }
+}
 
 async function applyAdminAdjustment() {
   const message = document.getElementById("adminMessage");
@@ -1248,7 +1275,8 @@ async function applyAdminAdjustment() {
       })
     });
 
-    message.textContent = "Adjustment recorded successfully.";
+    message.textContent = "Adjustment recorded successfully."; 
+    await loadAdminHistory(); 
 
     document.getElementById("adminPointsDelta").value = 0;
     document.getElementById("adminWinsDelta").value = 0;
@@ -1276,8 +1304,12 @@ document.querySelectorAll("nav [data-page]").forEach(btn=>btn.addEventListener("
   });
 
   if(btn.dataset.page==="leaderboard")loadLeaderboard();
-  if(btn.dataset.page==="slip")renderSlip();
-  if(btn.dataset.page==="admin")loadAdminUsers();
+if(btn.dataset.page==="slip")renderSlip();
+
+if(btn.dataset.page==="admin"){
+  loadAdminUsers();
+  loadAdminHistory();
+}
 
 })); 
 document.getElementById("competition").addEventListener("change",()=>{
