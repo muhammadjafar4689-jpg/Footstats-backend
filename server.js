@@ -2,6 +2,7 @@ require("dotenv").config();
 
 const express = require("express");
 const cors = require("cors");
+const crypto = require("crypto"); 
 
 const app = express();
 app.use(cors());
@@ -2652,6 +2653,138 @@ app.get("/api/admin/house-accounts", async (req, res) => {
 
   } catch (error) {
     sendError(res, 403, "Could not load house accounts.", {
+      details: error.message
+    });
+  }
+});
+// ---------------- INITIALIZE 19 HOUSE ACCOUNTS ----------------
+
+app.post("/api/admin/house-accounts/initialize", async (req, res) => {
+  try {
+    await verifyAdmin(req);
+
+    const [profiles, houseAccounts] = await Promise.all([
+      supabaseRequest(
+        "profiles?select=user_id,username",
+        { method: "GET" }
+      ),
+      supabaseRequest(
+        "house_accounts?select=user_id",
+        { method: "GET" }
+      )
+    ]);
+
+    const profileByUsername = new Map(
+      (profiles || []).map(p => [
+        String(p.username || "").toLowerCase(),
+        p
+      ])
+    );
+
+    const houseUserIds = new Set(
+      (houseAccounts || []).map(a => a.user_id)
+    );
+
+    const created = [];
+    const skipped = [];
+
+    for (let i = 1; i <= HOUSE_ACCOUNT_COUNT; i++) {
+      const username = `HouseBot${String(i).padStart(2, "0")}`;
+      const email = `${username.toLowerCase()}@footstats.invalid`;
+
+      const existingProfile = profileByUsername.get(
+        username.toLowerCase()
+      );
+
+      if (existingProfile) {
+        if (houseUserIds.has(existingProfile.user_id)) {
+          skipped.push(username);
+          continue;
+        }
+
+        throw new Error(
+          `${username} already exists but is not registered as a house account.`
+        );
+      }
+
+      const password = crypto.randomBytes(36).toString("base64url");
+
+      const authUser = await supabaseAuthAdminRequest("users", {
+        method: "POST",
+        body: {
+          email,
+          password,
+          email_confirm: true,
+          user_metadata: {
+            account_type: "house",
+            display_name: username
+          }
+        }
+      });
+
+      const userId = authUser?.id || authUser?.user?.id;
+
+      if (!userId) {
+        throw new Error(`Could not obtain the ID for ${username}.`);
+      }
+
+      try {
+        const existingUserProfile = await supabaseRequest(
+          `profiles?user_id=eq.${userId}&select=user_id`,
+          { method: "GET" }
+        );
+
+        // An Auth trigger may already have created this profile.
+        if (!existingUserProfile || existingUserProfile.length === 0) {
+          await supabaseRequest("profiles", {
+            method: "POST",
+            body: {
+              user_id: userId,
+              username
+            }
+          });
+        }
+
+        await supabaseRequest("house_accounts", {
+          method: "POST",
+          body: {
+            user_id: userId,
+            is_active: true,
+            strategy: "balanced",
+            settings: {},
+            prize_eligible: false
+          }
+        });
+
+        created.push(username);
+        houseUserIds.add(userId);
+
+      } catch (error) {
+        // Clean up the Auth user if account setup fails.
+        try {
+          await supabaseAuthAdminRequest(`users/${userId}`, {
+            method: "DELETE"
+          });
+        } catch {}
+
+        throw new Error(
+          `Failed to set up ${username}: ${error.message}`
+        );
+      }
+    }
+
+    res.json({
+      success: true,
+      message: "House account initialization completed.",
+      created_count: created.length,
+      skipped_count: skipped.length,
+      created,
+      skipped,
+      prize_eligible: false
+    });
+
+  } catch (error) {
+    sendError(res, 400, "Could not initialize house accounts.", {
       details: error.message
     });
   }
