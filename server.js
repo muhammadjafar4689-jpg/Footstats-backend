@@ -2618,6 +2618,44 @@ details: error.message
 });
 }
 });
+// ---------------- VIEW HOUSE ACCOUNTS ----------------
+
+app.get("/api/admin/house-accounts", async (req, res) => {
+  try {
+    await verifyAdmin(req);
+
+    const [accounts, profiles] = await Promise.all([
+      supabaseRequest(
+        "house_accounts?select=user_id,is_active,strategy,settings,prize_eligible,created_at,updated_at&order=created_at.asc",
+        { method: "GET" }
+      ),
+      supabaseRequest(
+        "profiles?select=user_id,username",
+        { method: "GET" }
+      )
+    ]);
+
+    const usernames = new Map(
+      (profiles || []).map(p => [p.user_id, p.username])
+    );
+
+    const result = (accounts || []).map(account => ({
+      ...account,
+      username: usernames.get(account.user_id) || "Unknown house account"
+    }));
+
+    res.json({
+      success: true,
+      count: result.length,
+      accounts: result
+    });
+
+  } catch (error) {
+    sendError(res, 403, "Could not load house accounts.", {
+      details: error.message
+    });
+  }
+});
 app.get("/api/leaderboard", async (req, res) => {
   try {
     const requestedDate = String(req.query.weekDate || "").trim();
