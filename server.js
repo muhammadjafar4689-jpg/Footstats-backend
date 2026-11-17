@@ -2762,10 +2762,12 @@ const houseAccountNumbers = new Set(
             user_id: userId,
             is_active: true,
             strategy: "balanced",
-            settings: {},
+            settings: {
+            bot_number: i
+            }, 
             prize_eligible: false,
             created_by: admin.id
-          
+           } 
         }); 
 
         created.push(username);
