@@ -2439,6 +2439,43 @@ details: error.message
 });
 }
 });
+// ---------------- ADMIN ADJUSTMENT HISTORY ----------------
+
+app.get("/api/admin/adjustments", async (req, res) => {
+  try {
+    await verifyAdmin(req);
+
+    const adjustments = await supabaseRequest(
+      "admin_user_adjustments?select=id,target_user_id,admin_user_id,points_delta,win_cards_delta,reason,created_at&order=created_at.desc&limit=100",
+      { method: "GET" }
+    );
+
+    const profiles = await supabaseRequest(
+      "profiles?select=user_id,username",
+      { method: "GET" }
+    );
+
+    const usernames = new Map(
+      (profiles || []).map(p => [p.user_id, p.username])
+    );
+
+    const history = (adjustments || []).map(item => ({
+      ...item,
+      username: usernames.get(item.target_user_id) || "Unknown user"
+    }));
+
+    res.json({
+      success: true,
+      count: history.length,
+      adjustments: history
+    });
+
+  } catch (error) {
+    sendError(res, 403, "Could not load administrator history.", {
+      details: error.message
+    });
+  }
+});
 
 // ---------------- ADJUST USER POINTS AND WIN CARDS ----------------
 
