@@ -941,11 +941,12 @@ function updateAccount(){
   document.getElementById("authForm").hidden=!!user;
   document.getElementById("signOut").hidden=!user;
   document.getElementById("usernameBlock").hidden=!user;
+  setAdminVisibility(); 
   if(user)loadProfile();
 }
 async function loadProfile(){
   if(!user)return;
-  const {data}=await db.from("profiles").select("username").eq("id",user.id).single();
+  const {data}=await db.from("profiles").select("username").eq("user_id",user.id).single();
   document.getElementById("usernameInput").value=data?.username||"";
 }
 async function saveUsername(){
@@ -1265,13 +1266,20 @@ async function applyAdminAdjustment() {
 document.getElementById("adminApply")
   .addEventListener("click", applyAdminAdjustment);
 document.querySelectorAll("nav [data-page]").forEach(btn=>btn.addEventListener("click",()=>{
+
+  if(btn.dataset.page==="admin" && !isAdminUser()) return;
+
   document.querySelectorAll("nav [data-page]").forEach(b=>b.classList.toggle("active",b===btn));
+
   document.querySelectorAll("main section").forEach(s=>{
     s.hidden=s.id!=="page-"+btn.dataset.page;
   });
+
   if(btn.dataset.page==="leaderboard")loadLeaderboard();
   if(btn.dataset.page==="slip")renderSlip();
-}));
+  if(btn.dataset.page==="admin")loadAdminUsers();
+
+})); 
 document.getElementById("competition").addEventListener("change",()=>{
   selectedCompetition=document.getElementById("competition").value;
   renderMatches();
