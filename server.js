@@ -2700,7 +2700,7 @@ const houseAccountNumbers = new Set(
       if (houseAccountNumbers.has(i)) {
        skipped.push(username);
        continue;
-       }
+      }
 
       const existingProfile = profileByUsername.get(
         username.toLowerCase()
