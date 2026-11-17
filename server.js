@@ -2798,6 +2798,123 @@ app.post("/api/admin/house-accounts/initialize", async (req, res) => {
     });
   }
 });
+// ---------------- UPDATE HOUSE ACCOUNT ----------------
+
+app.patch("/api/admin/house-accounts/:userId", async (req, res) => {
+  try {
+    await verifyAdmin(req);
+
+    const userId = String(req.params.userId || "").trim();
+    const { username, is_active, strategy } = req.body || {};
+
+    if (!/^[0-9a-f-]{36}$/i.test(userId)) {
+      return sendError(res, 400, "Invalid house account ID.");
+    }
+
+    const updates = {};
+
+    if (username !== undefined) {
+      const cleanUsername = String(username).trim();
+
+      if (!/^[a-zA-Z0-9_]{3,24}$/.test(cleanUsername)) {
+        return sendError(
+          res,
+          400,
+          "Username must be 3–24 characters using letters, numbers or underscores."
+        );
+      }
+
+      const profiles = await supabaseRequest(
+        "profiles?select=user_id,username",
+        { method: "GET" }
+      );
+
+      const duplicate = (profiles || []).some(profile =>
+        String(profile.username).toLowerCase() === cleanUsername.toLowerCase() &&
+        profile.user_id !== userId
+      );
+
+      if (duplicate) {
+        return sendError(res, 409, "That username is already taken.");
+      }
+
+      updates.username = cleanUsername;
+    }
+
+    if (is_active !== undefined) {
+      if (typeof is_active !== "boolean") {
+        return sendError(res, 400, "is_active must be true or false.");
+      }
+
+      updates.is_active = is_active;
+    }
+
+    if (strategy !== undefined) {
+      if (!HOUSE_ACCOUNT_STRATEGIES.has(strategy)) {
+        return sendError(res, 400, "Invalid house account strategy.");
+      }
+
+      updates.strategy = strategy;
+    }
+
+    if (Object.keys(updates).length === 0) {
+      return sendError(res, 400, "No valid changes supplied.");
+    }
+
+    const existing = await supabaseRequest(
+      `house_accounts?user_id=eq.${encodeURIComponent(userId)}&select=user_id`,
+      { method: "GET" }
+    );
+
+    if (!existing || existing.length === 0) {
+      return sendError(res, 404, "House account not found.");
+    }
+
+    if (updates.username !== undefined) {
+      await supabaseRequest(
+        `profiles?user_id=eq.${encodeURIComponent(userId)}`,
+        {
+          method: "PATCH",
+          body: { username: updates.username }
+        }
+      );
+    }
+
+    const houseUpdates = {};
+
+    if (updates.is_active !== undefined) {
+      houseUpdates.is_active = updates.is_active;
+    }
+
+    if (updates.strategy !== undefined) {
+      houseUpdates.strategy = updates.strategy;
+    }
+
+    if (Object.keys(houseUpdates).length > 0) {
+      houseUpdates.updated_at = new Date().toISOString();
+
+      await supabaseRequest(
+        `house_accounts?user_id=eq.${encodeURIComponent(userId)}`,
+        {
+          method: "PATCH",
+          body: houseUpdates
+        }
+      );
+    }
+
+    res.json({
+      success: true,
+      message: "House account updated successfully.",
+      user_id: userId,
+      changes: updates
+    });
+
+  } catch (error) {
+    sendError(res, 400, "Could not update house account.", {
+      details: error.message
+    });
+  }
+});
 app.get("/api/leaderboard", async (req, res) => {
   try {
     const requestedDate = String(req.query.weekDate || "").trim();
