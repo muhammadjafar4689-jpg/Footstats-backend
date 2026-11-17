@@ -2661,7 +2661,7 @@ app.get("/api/admin/house-accounts", async (req, res) => {
 
 app.post("/api/admin/house-accounts/initialize", async (req, res) => {
   try {
-    await verifyAdmin(req);
+    const admin = await verifyAdmin(req); 
 
     const [profiles, houseAccounts] = await Promise.all([
       supabaseRequest(
@@ -2745,22 +2745,30 @@ app.post("/api/admin/house-accounts/initialize", async (req, res) => {
           });
         }
 
-        await supabaseRequest("house_accounts", {
+               await supabaseRequest("house_accounts", {
           method: "POST",
           body: {
             user_id: userId,
             is_active: true,
             strategy: "balanced",
             settings: {},
-            prize_eligible: false
-          }
-        });
+            prize_eligible: false,
+            created_by: admin.id
+          
+        }); 
 
         created.push(username);
         houseUserIds.add(userId);
 
       } catch (error) {
-        // Clean up the Auth user if account setup fails.
+        // Clean up the profile and Auth user if setup fails.
+        try {
+          await supabaseRequest(
+            `profiles?user_id=eq.${userId}`,
+            { method: "DELETE", prefer: "return=minimal" }
+          );
+        } catch {}
+
         try {
           await supabaseAuthAdminRequest(`users/${userId}`, {
             method: "DELETE"
