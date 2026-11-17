@@ -2772,6 +2772,7 @@ const houseAccountNumbers = new Set(
 
         created.push(username);
         houseUserIds.add(userId);
+        houseAccountNumbers.add(i); 
 
       } catch (error) {
         // Clean up the profile and Auth user if setup fails.
