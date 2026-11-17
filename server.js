@@ -1976,6 +1976,12 @@ async function getUserFromJwt(token) {
 }
 
 app.post("/api/cards", async (req, res) => {
+  console.log("[CARDS] Submission request received", {
+  picksCount: Array.isArray(req.body?.picks)
+    ? req.body.picks.length
+    : 0,
+  time: new Date().toISOString()
+}); 
   try {
     const token = String(req.get("authorization") || "")
       .replace(/^Bearer\s+/i, "");
@@ -2198,6 +2204,8 @@ app.post("/api/cards", async (req, res) => {
     });
 
   } catch (error) {
+    console.error("[CARDS] SUBMISSION FAILED:", error.message);
+console.error("[CARDS] ERROR DETAILS:", error.stack); 
     const status = error.message?.includes("Supabase HTTP 400")
       ? 400
       : 500;
