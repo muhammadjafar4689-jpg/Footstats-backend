@@ -2003,10 +2003,11 @@ app.post("/api/cards", async (req, res) => {
     const verifiedCache = new Map();
 
     const picks = rawPicks.map(p => {
-      const marketKey = getMarketKey(p);
-      const line = safeNumber(
-        p.point_value ?? p.line ?? p.point
-      );
+     const marketKey = getMarketKey(p);
+
+  const line = marketKey === "alternate_totals"
+  ? safeNumber(p.point_value ?? p.line ?? p.point)
+  : null;  
 
       return {
         event_id: getEventId(p),
