@@ -2031,6 +2031,7 @@ app.post("/api/cards", async (req, res) => {
 
     for (const pick of picks) {
       if (!pick.event_id || !pick.sport_key) {
+       console.error("[CARDS] REJECTED: Missing event_id or sport_key.");  
         return sendError(
           res,
           400,
@@ -2039,14 +2040,16 @@ app.post("/api/cards", async (req, res) => {
       }
 
       if (!pick.outcome) {
-        return sendError(
-          res,
-          400,
-          "Pick is missing its outcome."
-        );
-      }
+  console.error("[CARDS] REJECTED: Pick is missing its outcome.");
+  return sendError(
+    res,
+    400,
+    "Pick is missing its outcome."
+  );
+} 
 
       if (!SETTLEABLE_MARKET_KEYS.has(pick.market_key)) {
+        console.error("[CARDS] REJECTED: Unsupported market:", pick.market_key); 
         return sendError(
           res,
           400,
@@ -2142,6 +2145,11 @@ app.post("/api/cards", async (req, res) => {
       });
 
       if (!verifiedOutcome) {
+       console.error("[CARDS] REJECTED: Selection does not match cached odds.", {
+  market: pick.market_key,
+  outcome: pick.outcome,
+  point: pick.point
+});  
         return sendError(
           res,
           400,
@@ -2165,6 +2173,7 @@ app.post("/api/cards", async (req, res) => {
       pick.price = trustedOdds;
     }
 
+    console.log("[CARDS] All picks verified. Attempting to save card."); 
     const card = await supabaseRequest(
       "rpc/submit_prediction_card",
       {
