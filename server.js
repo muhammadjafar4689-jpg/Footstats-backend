@@ -17,6 +17,60 @@ const SCORING_SECRET = process.env.SCORING_SECRET;
 const ODDS_BASE = "https://api.the-odds-api.com/v4";
 const TABLE = "prediction_entries";
 const TZ = "Africa/Lagos";
+// ---------------- HOUSE ACCOUNT AUTH ----------------
+
+async function supabaseAuthAdminRequest(path, options = {}) {
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+    throw new Error("Supabase is not configured.");
+  }
+
+  const response = await fetch(
+    `${SUPABASE_URL}/auth/v1/admin/${path}`,
+    {
+      method: options.method || "GET",
+      headers: {
+        apikey: SUPABASE_SERVICE_ROLE_KEY,
+        Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+        "Content-Type": "application/json"
+      },
+      body: options.body === undefined
+        ? undefined
+        : JSON.stringify(options.body)
+    }
+  );
+
+  const text = await response.text();
+
+  let data;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    data = text;
+  }
+
+  if (!response.ok) {
+    throw new Error(
+      `Supabase Auth HTTP ${response.status}: ${
+        typeof data === "string"
+          ? data
+          : JSON.stringify(data)
+      }`
+    );
+  }
+
+  return data;
+}
+
+// ---------------- HOUSE ACCOUNT SETTINGS ----------------
+
+const HOUSE_ACCOUNT_COUNT = 19;
+
+const HOUSE_ACCOUNT_STRATEGIES = new Set([
+  "balanced",
+  "favorites",
+  "underdog",
+  "odds_based"
+]);
 function getNigeriaMarketCacheDay() {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Africa/Lagos",
