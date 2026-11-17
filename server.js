@@ -2716,9 +2716,10 @@ app.post("/api/admin/house-accounts/initialize", async (req, res) => {
           password,
           email_confirm: true,
           user_metadata: {
-            account_type: "house",
-            display_name: username
-          }
+          account_type: "house",
+          username: username,
+          display_name: username
+          } 
         }
       });
 
