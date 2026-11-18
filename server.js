@@ -1292,6 +1292,225 @@ async function saveHouseBotMarketCache(
     }
   );
 }
+// ---------------- HOUSEBOT TARGETED MARKET FETCHER ----------------
+
+async function fetchHouseBotMarketsNow( 
+  sport,
+  eventId,
+  regions,
+  requestedMarketKeys
+) {
+  const marketKeys = [
+    ...new Set(
+      requestedMarketKeys.filter(key =>
+        REQUESTABLE_MARKET_KEYS.includes(key)
+      )
+    )
+  ];
+
+  const markets = {};
+
+  // First, check the shared HouseBot cache.
+  const cachedResults = await Promise.all(
+    marketKeys.map(async key => ({
+      key,
+      payload: await readHouseBotMarketCache(
+        sport,
+        eventId,
+        regions,
+        key
+      )
+    }))
+  );
+
+  const missingKeys = [];
+
+  for (const item of cachedResults) {
+    if (item.payload) {
+      markets[item.key] = item.payload;
+    } else {
+      missingKeys.push(item.key);
+    }
+  }
+
+  // Everything is already cached.
+  if (!missingKeys.length) {
+    return markets;
+  }
+
+  // Fetch only the missing markets.
+  const result = await fetchBatchResilient(
+    sport,
+    eventId,
+    regions,
+    missingKeys
+  );
+
+  // Combine bookmaker responses.
+  const mergedBookmakers = new Map();
+
+  for (const data of result.events) {
+    for (const bookmaker of data.bookmakers || []) {
+      const bookmakerKey =
+        bookmaker.key || bookmaker.title || "unknown";
+
+      if (!mergedBookmakers.has(bookmakerKey)) {
+        mergedBookmakers.set(bookmakerKey, {
+          key: bookmaker.key,
+          title: bookmaker.title,
+          markets: []
+        });
+      }
+
+      mergedBookmakers.get(bookmakerKey).markets.push(
+        ...(bookmaker.markets || [])
+      );
+    }
+  }
+
+  const normalizedMarkets = getBestMarkets({
+    bookmakers: Array.from(mergedBookmakers.values())
+  });
+
+  // Save each returned market separately.
+  for (const key of missingKeys) {
+    const market = normalizedMarkets[key];
+
+    if (!market || !market.outcomes?.length) {
+      continue;
+    }
+
+    await saveHouseBotMarketCache(
+      sport,
+      eventId,
+      regions,
+      key,
+      market
+    );
+
+    markets[key] = market;
+  }
+
+  return markets;
+ }
+// ---------------- HOUSEBOT SHARED MARKET REQUEST COORDINATOR ----------------
+
+const houseBotMarketPendingBatches = new Map();
+const houseBotMarketInFlight = new Map();
+
+async function fetchHouseBotMarkets(
+  sport,
+  eventId,
+  regions,
+  requestedMarketKeys
+) {
+  const marketKeys = [
+    ...new Set(
+      requestedMarketKeys.filter(key =>
+        REQUESTABLE_MARKET_KEYS.includes(key)
+      )
+    )
+  ];
+
+  if (!marketKeys.length) return {};
+
+  const matchId = `${sport}|${eventId}|${regions}`;
+  const marketPromises = [];
+
+  for (const marketKey of marketKeys) {
+    const requestId = `${matchId}|${marketKey}`;
+
+    // Reuse a market request already being processed.
+    if (houseBotMarketInFlight.has(requestId)) {
+      marketPromises.push(
+        houseBotMarketInFlight.get(requestId).then(
+          market => ({ key: marketKey, market })
+        )
+      );
+      continue;
+    }
+
+    let resolveMarket;
+    let rejectMarket;
+
+    const marketPromise = new Promise((resolve, reject) => {
+      resolveMarket = resolve;
+      rejectMarket = reject;
+    });
+
+    houseBotMarketInFlight.set(requestId, marketPromise);
+
+    let batch = houseBotMarketPendingBatches.get(matchId);
+
+    if (!batch) {
+      batch = {
+        sport,
+        eventId,
+        regions,
+        markets: new Map(),
+        timer: null
+      };
+
+      houseBotMarketPendingBatches.set(matchId, batch);
+    }
+
+    batch.markets.set(marketKey, {
+      resolve: resolveMarket,
+      reject: rejectMarket
+    });
+
+    marketPromises.push(
+      marketPromise.then(market => ({
+        key: marketKey,
+        market
+      }))
+    );
+
+    // Give other bots a short window to add their markets.
+    if (!batch.timer) {
+      batch.timer = setTimeout(async () => {
+        houseBotMarketPendingBatches.delete(matchId);
+
+        const entries = Array.from(batch.markets.entries());
+        const keys = entries.map(([key]) => key);
+
+        try {
+          const results = await fetchHouseBotMarketsNow(
+            batch.sport,
+            batch.eventId,
+            batch.regions,
+            keys
+          );
+
+          for (const [key, handlers] of entries) {
+            const requestId = `${matchId}|${key}`;
+
+            houseBotMarketInFlight.delete(requestId);
+            handlers.resolve(results[key] || null);
+          }
+        } catch (error) {
+          for (const [key, handlers] of entries) {
+            const requestId = `${matchId}|${key}`;
+
+            houseBotMarketInFlight.delete(requestId);
+            handlers.reject(error);
+          }
+        }
+      }, 50);
+    }
+  }
+
+  const results = await Promise.all(marketPromises);
+  const markets = {};
+
+  for (const item of results) {
+    if (item.market) {
+      markets[item.key] = item.market;
+    }
+  }
+
+  return markets;  
+ }
 
 app.get("/api/match-markets", async (req, res) => {
   try {
