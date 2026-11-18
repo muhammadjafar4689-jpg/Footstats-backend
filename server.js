@@ -72,6 +72,130 @@ const HOUSE_ACCOUNT_STRATEGIES = new Set([
   "underdog",
   "odds_based"
 ]);
+// ---------------- HOUSEBOT STRATEGY ENGINE ----------------
+
+function selectHouseOutcome(outcomes, strategy) {
+  if (!Array.isArray(outcomes) || outcomes.length === 0) {
+    return null;
+  }
+
+  if (!HOUSE_ACCOUNT_STRATEGIES.has(strategy)) {
+    throw new Error("Invalid HouseBot strategy.");
+  }
+
+  const valid = outcomes.filter(o => {
+    const price = safeNumber(o.price);
+    return o.name && price !== null && price > 1;
+  });
+
+  if (valid.length === 0) return null;
+
+  // FAVORITES: choose the lowest available odds.
+  if (strategy === "favorites") {
+    return {
+      ...valid.reduce((a, b) =>
+        a.price <= b.price ? a : b
+      )
+    };
+  }
+
+  // UNDERDOG: choose the highest odds,
+  // avoiding extreme odds above 8 when possible.
+  if (strategy === "underdog") {
+    const candidates = valid.filter(o => o.price <= 8);
+    const pool = candidates.length ? candidates : valid;
+
+    return {
+      ...pool.reduce((a, b) =>
+        a.price >= b.price ? a : b
+      )
+    };
+  }
+
+  // BALANCED: choose odds closest to 2.00.
+  if (strategy === "balanced") {
+    const distance = Math.min(
+      ...valid.map(o => Math.abs(o.price - 2))
+    );
+
+    const candidates = valid.filter(
+      o => Math.abs(o.price - 2) === distance
+    );
+
+    return {
+      ...candidates[crypto.randomInt(candidates.length)]
+    };
+  }
+
+  // ODDS BASED: randomly select using implied
+  // probability as the selection weight.
+  if (strategy === "odds_based") {
+    const weights = valid.map(o =>
+      Math.max(1, Math.round((1 / o.price) * 1000000))
+    );
+
+    const total = weights.reduce((sum, weight) => sum + weight, 0);
+
+    let ticket = crypto.randomInt(total);
+
+    for (let i = 0; i < valid.length; i++) {
+      ticket -= weights[i];
+
+      if (ticket < 0) {
+        return { ...valid[i] };
+      }
+    }
+  }
+
+  return null;
+      }
+function selectHouseMarket(markets, strategy) {
+  if (!markets || typeof markets !== "object") {
+    return null;
+  }
+
+  // Only use the five active FootStats markets.
+  const availableMarkets = MARKET_CATALOG
+    .filter(m => [
+      "h2h",
+      "double_chance",
+      "draw_no_bet",
+      "alternate_totals",
+      "btts"
+    ].includes(m.key))
+    .filter(m =>
+      Array.isArray(markets[m.key]?.outcomes) &&
+      markets[m.key].outcomes.length > 0
+    );
+
+  if (availableMarkets.length === 0) {
+    return null;
+  }
+
+  // Randomly choose one available market.
+  const market = availableMarkets[
+    crypto.randomInt(availableMarkets.length)
+  ];
+
+  const outcome = selectHouseOutcome(
+    markets[market.key].outcomes,
+    strategy
+  );
+
+  if (!outcome) return null;
+
+  return {
+    market_key: market.key,
+    market_name: market.name,
+    outcome: outcome.name,
+    selection: outcome.name,
+    odds: outcome.price,
+    price: outcome.price,
+    point: outcome.point ?? null,
+    point_value: outcome.point ?? null,
+    description: outcome.description ?? null
+  };
+} 
 function getNigeriaMarketCacheDay() {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Africa/Lagos",
