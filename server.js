@@ -1419,14 +1419,18 @@ async function fetchHouseBotMarketsNow(
     bookmakers: Array.from(mergedBookmakers.values())
   });
 
-  // Save each returned market separately.
-  for (const key of missingKeys) {
-    const market = normalizedMarkets[key];
+ // Save each returned market separately.
+for (const key of missingKeys) {
+  const market = normalizedMarkets[key];
 
-    if (!market || !market.outcomes?.length) {
-      continue;
-    }
+  if (!market || !market.outcomes?.length) {
+    continue;
+  }
 
+  // Keep the fetched market even if cache saving fails.
+  markets[key] = market;
+
+  try {
     await saveHouseBotMarketCache(
       sport,
       eventId,
@@ -1434,9 +1438,13 @@ async function fetchHouseBotMarketsNow(
       key,
       market
     );
-
-    markets[key] = market;
+  } catch (error) {
+    console.warn(
+      `HouseBot cache save failed for ${eventId} (${key}):`,
+      error.message
+    );
   }
+} 
 
   return markets;
  }
