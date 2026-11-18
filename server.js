@@ -1240,6 +1240,58 @@ async function fetchBatchResilient(sport, eventId, regions, marketKeys) {
     return { events, failures, quota, batchError: batchError.message };
   }
 }
+// ---------------- HOUSEBOT MARKET CACHE HELPERS ----------------
+
+// Read one market from the shared HouseBot cache.
+async function readHouseBotMarketCache(
+  sport,
+  eventId,
+  regions,
+  marketKey
+) {
+  const cacheQuery = new URLSearchParams({
+    select: "payload",
+    sport_key: `eq.${sport}`,
+    event_id: `eq.${eventId}`,
+    regions: `eq.${regions}`,
+    market_key: `eq.${marketKey}`,
+    cache_day: `eq.${todayNigeria()}`
+  });
+
+  const rows = await supabaseRequest(
+    `housebot_market_cache?${cacheQuery.toString()}`,
+    { method: "GET" }
+  );
+
+  return rows?.length ? rows[0].payload : null;
+}
+
+
+// Save one market so all HouseBots can reuse it.
+async function saveHouseBotMarketCache(
+  sport,
+  eventId,
+  regions,
+  marketKey,
+  payload
+) {
+  return await supabaseRequest(
+    "housebot_market_cache?on_conflict=sport_key,event_id,regions,market_key,cache_day",
+    {
+      method: "POST",
+      prefer: "resolution=merge-duplicates,return=representation",
+      body: {
+        sport_key: sport,
+        event_id: eventId,
+        regions,
+        market_key: marketKey,
+        cache_day: todayNigeria(),
+        payload,
+        fetched_at: new Date().toISOString()
+      }
+    }
+  );
+}
 
 app.get("/api/match-markets", async (req, res) => {
   try {
