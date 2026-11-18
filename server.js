@@ -3180,6 +3180,95 @@ app.patch("/api/admin/house-accounts/:userId", async (req, res) => {
     });
   }
 });
+// ---------------- HOUSEBOT PREDICTION SUBMISSION ----------------
+
+app.post("/api/admin/house-accounts/:userId/submit", async (req, res) => {
+  try {
+    // Only a verified admin can trigger HouseBot submissions.
+    await verifyAdmin(req);
+
+    const userId = req.params.userId;
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        error: "HouseBot user ID is required."
+      });
+    }
+
+    // Confirm this is a registered HouseBot.
+    const accounts = await supabaseRequest(
+      `house_accounts?user_id=eq.${encodeURIComponent(userId)}&select=user_id,is_active,strategy,prize_eligible`,
+      { method: "GET" }
+    );
+
+    const account = accounts?.[0];
+
+    if (!account) {
+      return res.status(404).json({
+        success: false,
+        error: "HouseBot account not found."
+      });
+    }
+
+    if (!account.is_active) {
+      return res.status(400).json({
+        success: false,
+        error: "This HouseBot is currently paused."
+      });
+    }
+
+    if (account.prize_eligible !== false) {
+      return res.status(403).json({
+        success: false,
+        error: "HouseBots cannot be prize eligible."
+      });
+    }
+
+    if (!HOUSE_ACCOUNT_STRATEGIES.has(account.strategy)) {
+      return res.status(400).json({
+        success: false,
+        error: "HouseBot has an invalid strategy."
+      });
+    }
+
+    // Generate predictions on the backend.
+    const picks = await generateHouseBotPicks(
+      userId,
+      account.strategy
+    );
+
+    // Submit through the existing secure prediction RPC.
+    // Deliberately does NOT call the referral reward RPC.
+    const result = await supabaseRequest(
+      "rpc/submit_prediction_card",
+      {
+        method: "POST",
+        body: {
+          p_user_id: userId,
+          p_picks: picks
+        }
+      }
+    );
+
+    return res.json({
+      success: true,
+      message: "HouseBot prediction card submitted.",
+      user_id: userId,
+      strategy: account.strategy,
+      picks_count: picks.length,
+      result
+    });
+
+  } catch (error) {
+    console.error("HouseBot submission error:", error);
+
+    return res.status(400).json({
+      success: false,
+      error: error.message || "HouseBot submission failed."
+    });
+  }
+});
 // ---------------- HOUSE ACCOUNT MANAGEMENT ----------------
 
 app.get("/api/admin/house-accounts", async (req, res) => {
