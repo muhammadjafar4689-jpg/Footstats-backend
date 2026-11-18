@@ -258,6 +258,72 @@ async function getHouseBotAvailableFixtures() {
 
   return available;
       }
+// ---------------- HOUSEBOT PREDICTION GENERATOR ----------------
+
+async function generateHouseBotPicks(userId, strategy) {
+  if (!HOUSE_ACCOUNT_STRATEGIES.has(strategy)) {
+    throw new Error("Invalid HouseBot strategy.");
+  }
+
+  const [fixtures, previousEntries] = await Promise.all([
+    getHouseBotAvailableFixtures(),
+
+    supabaseRequest(
+      `${TABLE}?user_id=eq.${encodeURIComponent(userId)}&select=picks`,
+      { method: "GET" }
+    )
+  ]);
+
+  // Prevent HouseBots from reusing previously selected matches.
+  const usedEventIds = new Set();
+
+  for (const entry of previousEntries || []) {
+    for (const pick of Array.isArray(entry.picks) ? entry.picks : []) {
+      const eventId = getEventId(pick);
+      if (eventId) usedEventIds.add(eventId);
+    }
+  }
+
+  const picks = [];
+
+  for (const fixture of fixtures) {
+    if (usedEventIds.has(fixture.event_id)) continue;
+
+    const selected = selectHouseMarket(
+      fixture.markets,
+      strategy
+    );
+
+    if (!selected) continue;
+
+    picks.push({
+      event_id: fixture.event_id,
+      sport_key: fixture.sport_key,
+      kickoff: fixture.kickoff,
+      home: fixture.home || fixture.home_team || "",
+      away: fixture.away || fixture.away_team || "",
+      league: fixture.league || fixture.sport_title || "",
+      market_key: selected.market_key,
+      market_name: selected.market_name,
+      outcome: selected.outcome,
+      selection: selected.selection,
+      odds: selected.odds,
+      price: selected.price,
+      point_value: selected.point_value,
+      description: selected.description
+    });
+
+    usedEventIds.add(fixture.event_id);
+  }
+
+  if (picks.length < 3) {
+    throw new Error(
+      `Only ${picks.length} eligible matches available. At least 3 are required.`
+    );
+  }
+
+  return picks;
+   }
 function getNigeriaMarketCacheDay() {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Africa/Lagos",
