@@ -195,7 +195,69 @@ function selectHouseMarket(markets, strategy) {
     point_value: outcome.point ?? null,
     description: outcome.description ?? null
   };
-} 
+}
+// ---------------- HOUSEBOT FIXTURE LOADER ----------------
+
+async function getHouseBotAvailableFixtures() {
+  const today = todayNigeria();
+  const cacheDay = getNigeriaMarketCacheDay();
+
+  // Load today's real cached fixtures.
+  const fixtureRows = await supabaseRequest(
+    `fixtures_cache?fixture_date=eq.${today}&select=event_id,sport_key,payload`,
+    { method: "GET" }
+  );
+
+  // Load today's saved bookmaker market data.
+  const marketQuery = new URLSearchParams({
+    select: "event_id,sport_key,payload",
+    regions: "eq.uk",
+    and: `(fetched_at.gte.${cacheDay.start},fetched_at.lt.${cacheDay.end})`
+  });
+
+  const marketRows = await supabaseRequest(
+    `match_markets_cache?${marketQuery.toString()}`,
+    { method: "GET" }
+  );
+
+  const marketMap = new Map(
+    (marketRows || []).map(row => [
+      `${row.sport_key}|${row.event_id}`,
+      row.payload
+    ])
+  );
+
+  const now = Date.now();
+  const available = [];
+
+  for (const row of fixtureRows || []) {
+    const fixture = row.payload;
+
+    if (!fixture || fixture.cache_marker) continue;
+
+    if (!fixture.event_id || !fixture.sport_key || !fixture.kickoff) {
+      continue;
+    }
+
+    // Never select matches that have already started.
+    if (new Date(fixture.kickoff).getTime() <= now) {
+      continue;
+    }
+
+    const marketPayload = marketMap.get(
+      `${row.sport_key}|${row.event_id}`
+    );
+
+    if (!marketPayload?.markets) continue;
+
+    available.push({
+      ...fixture,
+      markets: marketPayload.markets
+    });
+  }
+
+  return available;
+      }
 function getNigeriaMarketCacheDay() {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Africa/Lagos",
