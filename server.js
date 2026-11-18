@@ -248,11 +248,11 @@ async function getHouseBotAvailableFixtures() {
       `${row.sport_key}|${row.event_id}`
     );
 
-    if (!marketPayload?.markets) continue;
+    const cachedMarkets = marketPayload?.markets || {}; 
 
     available.push({
       ...fixture,
-      markets: marketPayload.markets
+      markets: cachedMarkets 
     });
   }
 
