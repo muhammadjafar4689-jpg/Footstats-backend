@@ -257,7 +257,7 @@ async function getHouseBotAvailableFixtures() {
   }
 
   return available;
-      }
+ }
 // ---------------- HOUSEBOT PREDICTION GENERATOR ----------------
 
 async function generateHouseBotPicks(userId, strategy) {
@@ -267,14 +267,12 @@ async function generateHouseBotPicks(userId, strategy) {
 
   const [fixtures, previousEntries] = await Promise.all([
     getHouseBotAvailableFixtures(),
-
     supabaseRequest(
       `${TABLE}?user_id=eq.${encodeURIComponent(userId)}&select=picks`,
       { method: "GET" }
     )
   ]);
 
-  // Prevent HouseBots from reusing previously selected matches.
   const usedEventIds = new Set();
 
   for (const entry of previousEntries || []) {
@@ -284,37 +282,86 @@ async function generateHouseBotPicks(userId, strategy) {
     }
   }
 
-  const picks = [];
+  const activeMarketKeys = [
+    "h2h",
+    "double_chance",
+    "draw_no_bet",
+    "alternate_totals",
+    "btts"
+  ];
 
-  for (const fixture of fixtures) {
-    if (usedEventIds.has(fixture.event_id)) continue;
+  const eligibleFixtures = fixtures.filter(fixture =>
+    fixture.event_id &&
+    fixture.sport_key &&
+    !usedEventIds.has(fixture.event_id)
+  );
 
-    const selected = selectHouseMarket(
-      fixture.markets,
-      strategy
-    );
+  const results = await Promise.all(
+    eligibleFixtures.map(async fixture => {
+      // Each bot independently chooses a market for this match.
+      const marketKey =
+        activeMarketKeys[crypto.randomInt(activeMarketKeys.length)];
 
-    if (!selected) continue;
+      // Reuse the normal fixture market cache when available.
+      let market = fixture.markets?.[marketKey];
 
-    picks.push({
-      event_id: fixture.event_id,
-      sport_key: fixture.sport_key,
-      kickoff: fixture.kickoff,
-      home: fixture.home || fixture.home_team || "",
-      away: fixture.away || fixture.away_team || "",
-      league: fixture.league || fixture.sport_title || "",
-      market_key: selected.market_key,
-      market_name: selected.market_name,
-      outcome: selected.outcome,
-      selection: selected.selection,
-      odds: selected.odds,
-      price: selected.price,
-      point_value: selected.point_value,
-      description: selected.description
-    });
+      // Otherwise, use the shared HouseBot market fetcher.
+      if (!market?.outcomes?.length) {
+        let fetchedMarkets = {};
 
-    usedEventIds.add(fixture.event_id);
-  }
+try {
+  fetchedMarkets = await fetchHouseBotMarkets(
+    fixture.sport_key,
+    fixture.event_id,
+    "uk",
+    [marketKey]
+  );
+} catch (error) {
+  console.warn(
+    `HouseBot market fetch failed for ${fixture.event_id}:`,
+    error.message
+  );
+
+  return null;
+}
+
+market = fetchedMarkets[marketKey]; 
+
+        market = fetchedMarkets[marketKey];
+      }
+
+      if (!market?.outcomes?.length) {
+        return null;
+      }
+
+      // Keep the existing strategy-based outcome selection.
+      const selected = selectHouseMarket(
+        { [marketKey]: market },
+        strategy
+      );
+
+      if (!selected) return null;
+
+      return {
+        event_id: fixture.event_id,
+        sport_key: fixture.sport_key,
+        kickoff: fixture.kickoff,
+        home: fixture.home || fixture.home_team || "",
+        away: fixture.away || fixture.away_team || "",
+        league: fixture.league || fixture.sport_title || "",
+        market_key: selected.market_key,
+        market_name: selected.market_name,
+        outcome: selected.outcome,
+        selection: selected.selection,
+        odds: selected.odds,
+        price: selected.price,
+        point_value: selected.point_value,
+        description: selected.description
+      };
+    })
+  );
+
+  const picks = results.filter(Boolean);
 
   if (picks.length < 3) {
     throw new Error(
@@ -323,7 +370,7 @@ async function generateHouseBotPicks(userId, strategy) {
   }
 
   return picks;
-   }
+ } 
 function getNigeriaMarketCacheDay() {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Africa/Lagos",
