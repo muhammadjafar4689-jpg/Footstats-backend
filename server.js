@@ -3544,6 +3544,53 @@ async function submitHouseBotCard(account) {
     result
   };
 } 
+// ---------------- HOUSEBOT BULK PROCESSOR ----------------
+
+async function processAllHouseBots() {
+  const accounts = await supabaseRequest(
+    "house_accounts?select=user_id,is_active,strategy,prize_eligible&order=created_at.asc",
+    { method: "GET" }
+  );
+
+  const activeBots = (accounts || []).filter(account =>
+    account.is_active === true &&
+    account.prize_eligible === false
+  );
+
+  const results = [];
+
+  for (const account of activeBots) {
+    try {
+      const submission = await submitHouseBotCard(account);
+
+      results.push({
+        user_id: account.user_id,
+        success: true,
+        picks_count: submission.picks_count
+      });
+
+    } catch (error) {
+      console.error(
+        `HouseBot ${account.user_id} failed:`,
+        error.message
+      );
+
+      results.push({
+        user_id: account.user_id,
+        success: false,
+        error: error.message
+      });
+    }
+  }
+
+  return {
+    total_active: activeBots.length,
+    successful: results.filter(item => item.success).length,
+    failed: results.filter(item => !item.success).length,
+    results
+  };
+}
+
 // ---------------- HOUSEBOT PREDICTION SUBMISSION ----------------
 
 app.post("/api/admin/house-accounts/:userId/submit", async (req, res) => {
@@ -3613,6 +3660,30 @@ app.post("/api/admin/house-accounts/:userId/submit", async (req, res) => {
     return res.status(400).json({
       success: false,
       error: error.message || "HouseBot submission failed."
+    });
+  }
+});
+// ---------------- HOUSEBOT BULK SUBMISSION ROUTE ----------------
+
+app.post("/api/admin/house-accounts/submit-all", async (req, res) => {
+  try {
+    // Only a verified admin can trigger bulk submissions.
+    await verifyAdmin(req);
+
+    const summary = await processAllHouseBots();
+
+    return res.json({
+      success: true,
+      message: "HouseBot bulk submission completed.",
+      ...summary
+    });
+
+  } catch (error) {
+    console.error("HouseBot bulk submission error:", error);
+
+    return res.status(400).json({
+      success: false,
+      error: error.message || "HouseBot bulk submission failed."
     });
   }
 });
