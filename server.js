@@ -3544,8 +3544,17 @@ async function submitHouseBotCard(account) {
     result
   };
 } 
-// ---------------- HOUSEBOT BULK PROCESSOR ----------------
+// ---------------- HOUSEBOT NIGERIA DATE ----------------
 
+function getHouseBotNigeriaDate() {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Africa/Lagos",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).format(new Date());
+}
+// ---------------- HOUSEBOT BULK PROCESSOR ----------------
 async function processAllHouseBots() {
   const accounts = await supabaseRequest(
     "house_accounts?select=user_id,is_active,strategy,prize_eligible&order=created_at.asc",
@@ -3557,28 +3566,96 @@ async function processAllHouseBots() {
     account.prize_eligible === false
   );
 
+  const today = getHouseBotNigeriaDate();
   const results = [];
 
   for (const account of activeBots) {
+    const userId = account.user_id;
+
+    let claimed = false;
+
     try {
+      // Claim today's submission slot.
+      // The database UNIQUE constraint prevents duplicate claims.
+      await supabaseRequest(
+        "house_bot_daily_submissions",
+        {
+          method: "POST",
+          body: {
+            bot_user_id: userId,
+            submission_date: today,
+            status: "processing"
+          }
+        }
+      );
+
+      claimed = true;
+
       const submission = await submitHouseBotCard(account);
 
+      await supabaseRequest(
+        `house_bot_daily_submissions?bot_user_id=eq.${encodeURIComponent(userId)}&submission_date=eq.${today}`,
+        {
+          method: "PATCH",
+          body: {
+            status: "success",
+            picks_count: submission.picks_count,
+            completed_at: new Date().toISOString()
+          }
+        }
+      );
+
       results.push({
-        user_id: account.user_id,
+        user_id: userId,
         success: true,
         picks_count: submission.picks_count
       });
 
     } catch (error) {
-      console.error(
-        `HouseBot ${account.user_id} failed:`,
-        error.message
-      );
+      const message = error.message || String(error);
+
+      if (!claimed && (
+        message.includes("23505") ||
+        message.toLowerCase().includes("duplicate key") ||
+        message.toLowerCase().includes("unique constraint")
+      )) {
+        results.push({
+          user_id: userId,
+          success: false,
+          skipped: true,
+          reason: "Already attempted submission today."
+        });
+
+        continue;
+      }
+
+      console.error(`HouseBot ${userId} failed:`, message);
+
+      if (claimed) {
+        try {
+          await supabaseRequest(
+            `house_bot_daily_submissions?bot_user_id=eq.${encodeURIComponent(userId)}&submission_date=eq.${today}`,
+            {
+              method: "PATCH",
+              body: {
+                status: "failed",
+                error_message: message,
+                completed_at: new Date().toISOString()
+              }
+            }
+          );
+        } catch (trackingError) {
+          console.error(
+            "HouseBot tracking update failed:",
+            trackingError.message
+          );
+        }
+      }
 
       results.push({
-        user_id: account.user_id,
+        user_id: userId,
         success: false,
-        error: error.message
+        error: message
       });
     }
   }
@@ -3586,10 +3663,11 @@ async function processAllHouseBots() {
   return {
     total_active: activeBots.length,
     successful: results.filter(item => item.success).length,
-    failed: results.filter(item => !item.success).length,
+    failed: results.filter(item => !item.success && !item.skipped).length,
+    skipped: results.filter(item => item.skipped).length,
     results
   };
-}
+ } 
 
 // ---------------- HOUSEBOT PREDICTION SUBMISSION ----------------
 
