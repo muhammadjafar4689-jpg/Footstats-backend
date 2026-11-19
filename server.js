@@ -3974,5 +3974,38 @@ app.listen(PORT, () => {
   console.log(`Active competitions (fixtures fetched): ${ACTIVE_COMPETITIONS.length}`);
   console.log(`Nigeria prediction date: ${todayNigeria()}`);
 });
+// ---------------- HOUSEBOT DAILY SCHEDULER ----------------
+
+let lastHouseBotRunDate = null;
+
+setInterval(async () => {
+  const nigeriaDate = getHouseBotNigeriaDate();
+
+  const nigeriaTime = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Africa/Lagos",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23"
+  }).format(new Date());
+
+  if (nigeriaTime !== "08:00") return;
+
+  if (lastHouseBotRunDate === nigeriaDate) return;
+
+  // Prevent another run today within this server process.
+  lastHouseBotRunDate = nigeriaDate;
+
+  try {
+    console.log("Starting daily HouseBot submissions:", nigeriaDate);
+
+    const summary = await processAllHouseBots();
+
+    console.log("Daily HouseBot submissions completed:", summary);
+
+  } catch (error) {
+    console.error("Daily HouseBot scheduler failed:", error.message);
+  }
+
+}, 30000);
   
  
