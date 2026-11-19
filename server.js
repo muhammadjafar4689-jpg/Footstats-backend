@@ -3506,6 +3506,44 @@ app.patch("/api/admin/house-accounts/:userId", async (req, res) => {
     });
   }
 });
+async function submitHouseBotCard(account) {
+  const userId = account.user_id;
+
+  if (!account.is_active) {
+    throw new Error("This HouseBot is currently paused.");
+  }
+
+  if (account.prize_eligible !== false) {
+    throw new Error("HouseBots cannot be prize eligible.");
+  }
+
+  if (!HOUSE_ACCOUNT_STRATEGIES.has(account.strategy)) {
+    throw new Error("HouseBot has an invalid strategy.");
+  }
+
+  const picks = await generateHouseBotPicks(
+    userId,
+    account.strategy
+  );
+
+  const result = await supabaseRequest(
+    "rpc/submit_prediction_card",
+    {
+      method: "POST",
+      body: {
+        p_user_id: userId,
+        p_picks: picks
+      }
+    }
+  );
+
+  return {
+    user_id: userId,
+    strategy: account.strategy,
+    picks_count: picks.length,
+    result
+  };
+} 
 // ---------------- HOUSEBOT PREDICTION SUBMISSION ----------------
 
 app.post("/api/admin/house-accounts/:userId/submit", async (req, res) => {
@@ -3558,32 +3596,15 @@ app.post("/api/admin/house-accounts/:userId/submit", async (req, res) => {
       });
     }
 
-    // Generate predictions on the backend.
-    const picks = await generateHouseBotPicks(
-      userId,
-      account.strategy
-    );
-
-    // Submit through the existing secure prediction RPC.
-    // Deliberately does NOT call the referral reward RPC.
-    const result = await supabaseRequest(
-      "rpc/submit_prediction_card",
-      {
-        method: "POST",
-        body: {
-          p_user_id: userId,
-          p_picks: picks
-        }
-      }
-    );
+    const submission = await submitHouseBotCard(account); 
 
     return res.json({
       success: true,
       message: "HouseBot prediction card submitted.",
       user_id: userId,
       strategy: account.strategy,
-      picks_count: picks.length,
-      result
+      picks_count: submission.picks_count,
+      result: submission.result 
     });
 
   } catch (error) {
