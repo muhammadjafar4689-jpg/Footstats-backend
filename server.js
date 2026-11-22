@@ -2201,6 +2201,41 @@ await supabaseRequest(
     matches.sort((a, b) =>
       new Date(a.kickoff).getTime() - new Date(b.kickoff).getTime()
     );
+    // ---------------- ADD HIGHLIGHTLY LOGOS TO FIXTURES ----------------
+
+let matchesWithLogos = matches;
+
+if (HIGHLIGHTLY_API_KEY && matches.length > 0) {
+  const logoResults = await mapWithConcurrency(
+    matches,
+    3,
+    async match => {
+      const results = await Promise.allSettled([
+        getHighlightlyLogo("team", match.home_team || match.home),
+        getHighlightlyLogo("team", match.away_team || match.away),
+        getHighlightlyLogo("league", match.sport_title || match.league)
+      ]);
+
+      return {
+        ...match,
+        home_logo: results[0].status === "fulfilled" ? results[0].value : null,
+        away_logo: results[1].status === "fulfilled" ? results[1].value : null,
+        league_logo: results[2].status === "fulfilled" ? results[2].value : null
+      };
+    }
+  );
+
+  matchesWithLogos = logoResults.map((result, index) =>
+    result.status === "fulfilled"
+      ? result.value
+      : {
+          ...matches[index],
+          home_logo: null,
+          away_logo: null,
+          league_logo: null
+        }
+  );  
+}
 
     res.json({
       success: true,
@@ -2208,7 +2243,7 @@ await supabaseRequest(
       timezone: TZ,
       date,
       count: matches.length,
-      matches,
+      matches: matchesWithLogos, 
       cached: freshEnough,
       errors: fetchErrors
     });
