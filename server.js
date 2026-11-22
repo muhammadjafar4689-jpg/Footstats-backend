@@ -11,6 +11,12 @@ app.use(express.json({ limit: "1mb" }));
 const PORT = process.env.PORT || 3000;
 
 const ODDS_API_KEY = process.env.ODDS_API_KEY;
+// HIGHLIGHTLY LOGO SERVICE
+const HIGHLIGHTLY_API_KEY = process.env.HIGHLIGHTLY_API_KEY;
+const HIGHLIGHTLY_BASE = "https://soccer.highlightly.net";
+
+const highlightlyLogoCache = new Map();
+const HIGHLIGHTLY_LOGO_CACHE_TTL = 24 * 60 * 60 * 1000;
 const SUPABASE_URL = (process.env.SUPABASE_URL || "").replace(/\/+$/, "");
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const SCORING_SECRET = process.env.SCORING_SECRET;
@@ -565,6 +571,62 @@ function sendError(res, status, message, extra = {}) {
     error: message,
     ...extra
   });
+}
+// ---------------- HIGHLIGHTLY LOGOS ----------------
+
+async function getHighlightlyLogo(type, name) {
+  if (!HIGHLIGHTLY_API_KEY) {
+    throw new Error("HIGHLIGHTLY_API_KEY is not configured.");
+  }
+
+  const cleanName = String(name || "").trim();
+
+  if (!cleanName) return null;
+
+  const cacheKey = `${type}:${cleanName.toLowerCase()}`;
+  const cached = highlightlyLogoCache.get(cacheKey);
+
+  if (cached && Date.now() - cached.at < HIGHLIGHTLY_LOGO_CACHE_TTL) {
+    return cached.logo;
+  }
+
+  const endpoint = type === "team" ? "/teams" : "/leagues";
+
+  const params = new URLSearchParams({
+    [type === "team" ? "name" : "leagueName"]: cleanName,
+    limit: "10"
+  });
+
+  const response = await fetch(
+    `${HIGHLIGHTLY_BASE}${endpoint}?${params}`,
+    {
+      headers: {
+        "x-rapidapi-key": HIGHLIGHTLY_API_KEY
+      }
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(`Highlightly HTTP ${response.status}`);
+  }
+
+  const result = await response.json();
+  const records = Array.isArray(result.data) ? result.data : [];
+
+  const normalize = value => normalizeText(value);
+
+  const match = records.find(item =>
+    normalize(item.name) === normalize(cleanName)
+  );
+
+  const logo = match?.logo || null;
+
+  highlightlyLogoCache.set(cacheKey, {
+    logo,
+    at: Date.now()
+  });
+
+  return logo;
 }
 
 function normalizeText(value) {
@@ -4086,6 +4148,39 @@ for (const adjustment of adminAdjustments || []) {
 /* -------------------------------------------------------
    START SERVER
 ------------------------------------------------------- */
+// ---------------- FIXTURE LOGOS ----------------
+
+app.get("/api/logos", async (req, res) => {
+  try {
+    const homeTeam = String(req.query.home || "").trim();
+    const awayTeam = String(req.query.away || "").trim();
+    const league = String(req.query.league || "").trim();
+
+    if (!homeTeam && !awayTeam && !league) {
+      return sendError(res, 400, "Provide a team or league name.");
+    }
+
+    const [homeLogo, awayLogo, leagueLogo] = await Promise.all([
+      homeTeam ? getHighlightlyLogo("team", homeTeam) : null,
+      awayTeam ? getHighlightlyLogo("team", awayTeam) : null,
+      league ? getHighlightlyLogo("league", league) : null
+    ]);
+
+    res.json({
+      success: true,
+      homeLogo,
+      awayLogo,
+      leagueLogo
+    });
+
+  } catch (error) {
+    console.error("Highlightly logo error:", error.message);
+
+    sendError(res, 502, "Could not retrieve football logos.", {
+      details: error.message
+    });
+  }
+});
 
 app.listen(PORT, () => {
   console.log(`FootStats backend running on port ${PORT}`);
