@@ -2607,6 +2607,126 @@ async function getUserFromJwt(token) {
 
   return response.json();
 }
+// ---------------- USER ACCOUNT AND HISTORY ----------------
+
+async function getRequestUser(req) {
+  const token = String(req.get("authorization") || "")
+    .replace(/^Bearer\s+/i, "");
+
+  if (!token) return null;
+
+  const user = await getUserFromJwt(token);
+
+  return user && user.id ? user : null;
+}
+
+
+// ---------------- USER ACCOUNT ----------------
+
+app.get("/api/account", async (req, res) => {
+  try {
+    const user = await getRequestUser(req);
+
+    if (!user) {
+      return sendError(res, 401, "Not signed in.");
+    }
+
+    const profiles = await supabaseRequest(
+      `profiles?user_id=eq.${encodeURIComponent(user.id)}&select=user_id,username,referral_code,created_at&limit=1`,
+      { method: "GET" }
+    );
+
+    const profile = Array.isArray(profiles)
+      ? profiles[0] || null
+      : null;
+
+    res.json({
+      success: true,
+      account: {
+        user_id: user.id,
+        email: user.email || "",
+        username: profile?.username || "",
+        referral_code: profile?.referral_code || "",
+        created_at: profile?.created_at || null
+      }
+    });
+
+  } catch (error) {
+    console.error("Account loading error:", error.message);
+    sendError(res, 500, "Could not load account information.");
+  }
+});
+
+
+// ---------------- USER PREDICTION HISTORY ----------------
+
+app.get("/api/my-cards", async (req, res) => {
+  try {
+    const user = await getRequestUser(req);
+
+    if (!user) {
+      return sendError(res, 401, "Not signed in.");
+    }
+
+    const cards = await supabaseRequest(
+      `prediction_entries?user_id=eq.${encodeURIComponent(user.id)}&select=id,picks,points,point,status,result,created_at,settled_at,points_awarded&order=created_at.desc&limit=100`,
+      { method: "GET" }
+    );
+
+    const allCards = Array.isArray(cards) ? cards : [];
+
+    res.json({
+      success: true,
+      count: allCards.length,
+      pendingCards: allCards.filter(
+        card => card.status === "pending"
+      ),
+      settledCards: allCards.filter(
+        card => card.status === "graded"
+      )
+    });
+
+  } catch (error) {
+    console.error("Prediction history error:", error.message);
+    sendError(res, 500, "Could not load prediction history.");
+  }
+});
+
+
+// ---------------- USER REFERRAL REWARDS ----------------
+
+app.get("/api/my-referral-rewards", async (req, res) => {
+  try {
+    const user = await getRequestUser(req);
+
+    if (!user) {
+      return sendError(res, 401, "Not signed in.");
+    }
+
+    const rewards = await supabaseRequest(
+      `referral_rewards?referrer_user_id=eq.${encodeURIComponent(user.id)}&select=id,points,awarded_at&order=awarded_at.desc&limit=100`,
+      { method: "GET" }
+    );
+
+    const rewardList = Array.isArray(rewards) ? rewards : [];
+
+    const totalPoints = rewardList.reduce(
+      (sum, reward) => sum + (Number(reward.points) || 0),
+      0
+    );
+
+    res.json({
+      success: true,
+      count: rewardList.length,
+      totalPoints,
+      rewards: rewardList
+    });
+
+  } catch (error) {
+    console.error("Referral history error:", error.message);
+    sendError(res, 500, "Could not load referral rewards.");
+  }
+});
 
 app.post("/api/cards", async (req, res) => {
   console.log("[CARDS] Submission request received", {
