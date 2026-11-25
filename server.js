@@ -2704,6 +2704,76 @@ async function getUserFromJwt(token) {
 
   return response.json();
 }
+// ---------------- MY SLIP ACTIVITY ----------------
+
+app.get("/api/my-activity", async (req, res) => {
+  try {
+    const authorization = String(req.headers.authorization || "");
+
+    const token = authorization.startsWith("Bearer ")
+      ? authorization.slice(7).trim()
+      : "";
+
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        error: "Authentication required."
+      });
+    }
+
+    const user = await getUserFromJwt(token);
+
+    if (!user || !user.id) {
+      return res.status(401).json({
+        success: false,
+        error: "Invalid or expired session."
+      });
+    }
+
+    const [entries, rewards] = await Promise.all([
+      supabaseRequest(
+        `prediction_entries?user_id=eq.${encodeURIComponent(user.id)}&select=id,picks,points,status,result,created_at,settled_at&order=created_at.desc`,
+        { method: "GET" }
+      ),
+
+      supabaseRequest(
+        `referral_rewards?referrer_user_id=eq.${encodeURIComponent(user.id)}&select=id,points,awarded_at&order=awarded_at.desc`,
+        { method: "GET" }
+      )
+    ]);
+
+    const activity = [
+      ...(entries || []).map(entry => ({
+        type: "prediction",
+        timestamp: entry.created_at,
+        data: entry
+      })),
+
+      ...(rewards || []).map(reward => ({
+        type: "referral_reward",
+        timestamp: reward.awarded_at,
+        data: reward
+      }))
+    ].sort((a, b) =>
+      new Date(b.timestamp).getTime() -
+      new Date(a.timestamp).getTime()
+    );
+
+    return res.json({
+      success: true,
+      count: activity.length,
+      activity
+    });
+
+  } catch (error) {
+    console.error("My activity error:", error.message);
+
+    return res.status(500).json({
+      success: false,
+      error: "Could not load your activity."
+    });
+  }
+});
 // ---------------- USER ACCOUNT AND HISTORY ----------------
 
 async function getRequestUser(req) {
